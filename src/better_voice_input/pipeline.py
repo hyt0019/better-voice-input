@@ -1,0 +1,91 @@
+from __future__ import annotations
+
+import threading
+import time
+from pathlib import Path
+
+from PySide6.QtCore import QObject, Signal
+
+from .audio import decode_audio
+from .cleanup import Cancelled, DeepSeekCleaner
+from .models import download_models
+from .settings import Settings, read_key
+
+
+class Events(QObject):
+    stage = Signal(int, str)
+    transcript = Signal(int, str)
+    completed = Signal(int, object)
+    failed = Signal(int, str)
+    level = Signal(float)
+    downloaded = Signal(int)
+
+
+class Pipeline:
+    def __init__(self, events: Events):
+        self.events = events
+        self.recognizer = None
+        self.lock = threading.Lock()
+
+    def start(self, job: int, cancel: threading.Event, settings: Settings, source, kind: str):
+        snapshot = Settings(**vars(settings))
+        thread = threading.Thread(target=self._run, args=(job, cancel, snapshot, source, kind), daemon=True)
+        thread.start()
+
+    def _run(self, job: int, cancel: threading.Event, settings: Settings, source, kind: str):
+        try:
+            if kind == "download":
+                download_models(
+                    settings.models,
+                    lambda value, _: self.events.stage.emit(job, f"正在下载模型 {value}%"),
+                    cancel,
+                )
+                self.events.downloaded.emit(job)
+                return
+            started = time.monotonic()
+            if kind == "text":
+                text = source
+                duration = 0
+            else:
+                samples = decode_audio(Path(source)) if kind == "file" else source
+                duration = samples.size / 16000
+                self.events.stage.emit(job, "正在本地识别…")
+                with self.lock:
+                    if cancel.is_set():
+                        raise Cancelled("已取消。")
+                    if self.recognizer is None or self.recognizer.directory != settings.models:
+                        from .asr import LocalRecognizer
+
+                        self.recognizer = LocalRecognizer(settings.models)
+                    text = self.recognizer.transcribe(
+                        samples, cancel, lambda value: self.events.transcript.emit(job, value)
+                    )
+                self.events.transcript.emit(job, text)
+                if not text.strip():
+                    raise RuntimeError("没有检测到清晰语音，请检查麦克风或靠近一些重试。")
+            asr_seconds = time.monotonic() - started
+            if cancel.is_set():
+                raise Cancelled("已取消。")
+            self.events.stage.emit(job, "正在整理你的表达…")
+            result = DeepSeekCleaner(read_key(), settings.model, settings.api_timeout).clean(
+                text, settings.glossary, cancel
+            )
+            self.events.completed.emit(
+                job, {"result": result, "asr_seconds": asr_seconds, "duration": duration}
+            )
+        except Cancelled:
+            return
+        except Exception as exc:
+            if not cancel.is_set():
+                from .audio import AudioError
+                from .cleanup import CleanupError
+                from .models import ModelError
+
+                message = (
+                    str(exc)
+                    if isinstance(exc, (AudioError, CleanupError, ModelError, OSError))
+                    else "处理未完成，请检查模型、音频文件或设备后重试。"
+                )
+                if isinstance(exc, RuntimeError) and str(exc).startswith("没有检测"):
+                    message = str(exc)
+                self.events.failed.emit(job, message)

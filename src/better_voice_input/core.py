@@ -90,9 +90,13 @@ def validate_cleanup(original: str, payload: CleanupPayload) -> tuple[str, ...]:
     unquoted = re.sub(r'“[^”]*”|「[^」]*」|"[^"]*"', "", payload.text)
     if correction and _UNRESOLVED.search(unquoted):
         warnings.append("结果中仍有改口表达，请核对是否已经完成更正。")
-    if len(_NEGATION.findall(payload.text)) < len(_NEGATION.findall(original)):
-        if not correction or not valid_edits:
-            warnings.append("否定表达发生变化，请核对原意。")
+    protected = original
+    for edit in valid_edits:
+        if _CORRECTION.search(edit.evidence):
+            protected = protected.replace(edit.source, edit.replacement, 1)
+    protected = re.sub(r"不对|不是[，,]\s*是", "", protected)
+    if len(_NEGATION.findall(payload.text)) < len(_NEGATION.findall(protected)):
+        warnings.append("否定表达发生变化，请核对原意。")
     for hedge in _HEDGE:
         if hedge in original and hedge not in payload.text:
             explained = any(

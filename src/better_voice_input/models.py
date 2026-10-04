@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
@@ -77,7 +78,7 @@ def download_models(
             if verify_file(target, spec):
                 done += spec.size
                 continue
-            temp = directory / (spec.name + ".part")
+            temp = directory / (spec.name + "." + uuid.uuid4().hex + ".part")
             received = 0
             try:
                 with client.stream("GET", spec.url) as response:

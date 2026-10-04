@@ -150,3 +150,19 @@ def test_missing_key_and_blank_input_never_call_api():
         DeepSeekCleaner("").clean("你好")
     with pytest.raises(CleanupError, match="没有"):
         DeepSeekCleaner("test").clean(" ")
+
+
+def test_unrelated_correction_cannot_hide_lost_negation():
+    source = "三点，不对，四点开会。不要删除文件。"
+    payload = CleanupPayload(
+        text="四点开会。删除文件。",
+        edits=[Edit(source="三点", replacement="四点", evidence="三点，不对，四点")],
+    )
+    assert any("否定" in warning for warning in validate_cleanup(source, payload))
+
+
+def test_ambiguous_number_negation_requires_review():
+    assert any(
+        "不是＋数字" in warning
+        for warning in validate_cleanup("预算3000元，不是5000元", CleanupPayload(text="预算5000元。"))
+    )
