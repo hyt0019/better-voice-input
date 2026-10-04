@@ -49,7 +49,26 @@ class Settings:
         path = path or data_dir() / "settings.json"
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
-            return cls(**{k: v for k, v in raw.items() if k in cls.__dataclass_fields__})
+            if not isinstance(raw, dict):
+                return cls()
+            defaults = cls()
+            values = {}
+            for key, value in raw.items():
+                if key not in cls.__dataclass_fields__:
+                    continue
+                if key == "microphone":
+                    if value is None or type(value) is int and value >= 0:
+                        values[key] = value
+                elif key == "glossary":
+                    if isinstance(value, list) and all(isinstance(word, str) for word in value):
+                        values[key] = [word[:80] for word in value[:100]]
+                elif type(value) is type(getattr(defaults, key)):
+                    values[key] = value
+            if values.get("hotkey") not in (None, "Ctrl+Shift+Space", "Ctrl+Alt+Space", "Alt+Shift+Space"):
+                values.pop("hotkey")
+            if not 1 <= values.get("api_timeout", 25) <= 120:
+                values.pop("api_timeout", None)
+            return cls(**values)
         except (OSError, ValueError, TypeError):
             return cls()
 

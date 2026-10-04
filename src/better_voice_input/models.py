@@ -56,12 +56,15 @@ def verify_file(path: Path, spec: ModelFile) -> bool:
 
 
 def models_ready(directory: Path, verify: bool = False) -> bool:
-    return all(
-        verify_file(directory / file.name, file)
-        if verify
-        else (directory / file.name).is_file() and (directory / file.name).stat().st_size == file.size
-        for file in FILES
-    )
+    try:
+        return all(
+            verify_file(directory / file.name, file)
+            if verify
+            else (directory / file.name).is_file() and (directory / file.name).stat().st_size == file.size
+            for file in FILES
+        )
+    except OSError:
+        return False
 
 
 def download_models(

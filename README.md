@@ -2,12 +2,26 @@
 
 Windows 智能语音输入工具：本地识别声音，使用 DeepSeek 清理结巴、无意义重复和明确的自我纠正，尽量保留原意与说话风格。
 
+![主界面](docs/images/main.png)
+
+## 使用
+
+在已构建的本机项目中双击 **启动好好说.cmd**，或运行 `dist/BetterVoiceInput/BetterVoiceInput.exe`。
+
+- `Ctrl+Shift+Space`：开始/结束录音，可在设置中更换，也支持按住说话。
+- `Esc`：取消当前任务。
+- `Ctrl+Alt+V`：将已核对的结果输入当前文本框。
+- 首次使用填写 DeepSeek API Key，并下载约 240 MB 本地语音模型。
+- 原文和结果可对照编辑；词库、可选加密历史、录音文件导入均已支持。
+
+完整说明见 [使用指南](docs/USER_GUIDE.md)，实测情况和限制见 [验证记录](docs/VALIDATION.md)。
+
 ## 开发进度
 
 - [x] 文字整理、语义保护与真实 API 验证
 - [x] 本地语音识别、模型下载与示例录音验证
 - [x] 桌面界面、录音、全局快捷键与输入
-- [ ] 集成测试、Windows 打包与使用说明
+- [x] 集成测试、Windows 打包与使用说明
 
 ## 开发环境
 
@@ -17,7 +31,10 @@ Windows 智能语音输入工具：本地识别声音，使用 DeepSeek 清理�
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 .\.venv\Scripts\python.exe -m pytest
+.\.venv\Scripts\python.exe -m better_voice_input.app
 ```
+
+精确依赖版本保存在 `requirements-lock.txt`。运行 `scripts/build.ps1` 可重新构建便携程序。仓库保存源码和构建方法，模型、密钥、用户录音和本地打包产物不进入 Git。
 
 可通过 `DEEPSEEK_API_KEY` 环境变量、Windows 凭据管理器或项目根目录的 `deepseek api key.txt` 提供测试密钥。密钥文件已被 Git 忽略，不会显示在日志中。日常使用建议在设置页保存到 Windows 凭据管理器。
 

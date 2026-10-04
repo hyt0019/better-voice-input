@@ -1,0 +1,17 @@
+$ErrorActionPreference = 'Stop'
+$taskRoot = Split-Path -Parent $PSScriptRoot
+Push-Location -LiteralPath $taskRoot
+try {
+    $taskTestDirectory = Join-Path $taskRoot ('artifacts\build-tests-' + [guid]::NewGuid().ToString('N'))
+    if (Test-Path -LiteralPath $taskTestDirectory) { throw 'Test directory unexpectedly exists.' }
+    & .\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider --basetemp $taskTestDirectory
+    if ($LASTEXITCODE -ne 0) { throw 'Tests failed.' }
+    & .\.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean BetterVoiceInput.spec
+    if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
+    Copy-Item -LiteralPath 'docs\USER_GUIDE.md' -Destination 'dist\BetterVoiceInput\使用说明.md'
+    Copy-Item -LiteralPath 'THIRD_PARTY_NOTICES.md' -Destination 'dist\BetterVoiceInput\THIRD_PARTY_NOTICES.md'
+    & .\.venv\Scripts\python.exe scripts/collect_licenses.py
+    Write-Output 'Built dist\BetterVoiceInput\BetterVoiceInput.exe'
+} finally {
+    Pop-Location
+}
