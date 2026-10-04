@@ -35,7 +35,7 @@ class Settings:
     microphone: int | None = None
     auto_insert: bool = True
     hotkey: str = "Ctrl+Shift+Space"
-    glossary: list[str] = field(default_factory=list)
+    glossary: list[str] = field(default_factory=lambda: ["DeepSeek", "API", "Windows", "Ctrl", "Shift"])
     api_timeout: float = 25.0
 
     @property

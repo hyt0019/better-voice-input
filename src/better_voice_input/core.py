@@ -84,6 +84,8 @@ def validate_cleanup(original: str, payload: CleanupPayload) -> tuple[str, ...]:
     target_numbers = {_number(x) for x in _NUMBERS.findall(payload.text)}
     if target_numbers - source_numbers:
         warnings.append("整理结果出现了原文中未找到的数字，请核对。")
+    if re.search(r"不是\s*(?:\d|[零〇一二两三四五六七八九十百千万])", original):
+        warnings.append("原文有“不是＋数字”的表达，可能是识别遗漏了改口停顿，请核对数字。")
     correction = bool(_CORRECTION.search(original))
     unquoted = re.sub(r'“[^”]*”|「[^」]*」|"[^"]*"', "", payload.text)
     if correction and _UNRESOLVED.search(unquoted):

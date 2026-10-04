@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from pathlib import Path
 
 from .cleanup import CleanupError, DeepSeekCleaner
@@ -11,30 +12,64 @@ from .settings import Settings, read_key
 def main() -> int:
     parser = argparse.ArgumentParser(description="Better Voice Input diagnostics")
     sub = parser.add_subparsers(dest="command", required=True)
+    download = sub.add_parser("download-models", help="下载并校验本地语音模型")
+    download.add_argument("--directory", type=Path)
     clean = sub.add_parser("clean", help="整理 UTF-8 文本文件")
     clean.add_argument("input", type=Path)
-    clean.add_argument("--key-file", type=Path)
-    clean.add_argument("--model", default=None)
+    transcribe = sub.add_parser("transcribe", help="本地识别音频文件")
+    transcribe.add_argument("input", type=Path)
+    transcribe.add_argument("--clean", action="store_true")
+    transcribe.add_argument("--directory", type=Path)
+    for command in (clean, transcribe):
+        command.add_argument("--key-file", type=Path)
+        command.add_argument("--model", default=None)
+        command.add_argument("--output", type=Path, help="保存结果 JSON（可能包含个人内容）")
     args = parser.parse_args()
     settings = Settings.load()
     try:
-        result = DeepSeekCleaner(read_key(args.key_file), args.model or settings.model).clean(
-            args.input.read_text(encoding="utf-8-sig"), settings.glossary
-        )
-        print(
-            json.dumps(
-                {
-                    "text": result.text,
-                    "warnings": result.warnings,
-                    "elapsed": round(result.elapsed, 2),
-                    "usage": result.usage,
-                },
-                ensure_ascii=False,
-                indent=2,
+        if args.command == "download-models":
+            from .models import download_models
+
+            last = [-1]
+
+            def progress(percent, name):
+                if percent // 10 != last[0]:
+                    print(f"{percent}% {name}", flush=True)
+                    last[0] = percent // 10
+
+            download_models(args.directory or settings.models, progress=progress)
+            return 0
+        data = {}
+        if args.command == "transcribe":
+            from .asr import LocalRecognizer
+            from .audio import decode_audio
+
+            started = time.monotonic()
+            audio = decode_audio(args.input)
+            data["duration"] = round(audio.size / 16000, 2)
+            recognizer = LocalRecognizer(args.directory or settings.models)
+            text = recognizer.transcribe(audio)
+            data.update(original=text, asr_seconds=round(time.monotonic() - started, 2))
+        else:
+            text = args.input.read_text(encoding="utf-8-sig")
+        if args.command == "clean" or args.clean:
+            result = DeepSeekCleaner(read_key(args.key_file), args.model or settings.model).clean(
+                text, settings.glossary
             )
-        )
+            data.update(
+                text=result.text,
+                warnings=result.warnings,
+                elapsed=round(result.elapsed, 2),
+                usage=result.usage,
+                edits=[edit.model_dump() for edit in result.edits],
+            )
+        rendered = json.dumps(data, ensure_ascii=False, indent=2)
+        if args.output:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(rendered, encoding="utf-8")
+        print(rendered)
         return 0
-    except (CleanupError, OSError) as exc:
+    except (CleanupError, OSError, RuntimeError) as exc:
         print(str(exc))
         return 1
 
