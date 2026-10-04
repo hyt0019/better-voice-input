@@ -1,0 +1,36 @@
+# Credentials and personal input
+.env
+.env.*
+!.env.example
+*key*.txt
+*.key
+*.pem
+/示例语音/
+/private/
+/local/
+*.wav
+*.mp3
+*.m4a
+*.mp4
+*.flac
+*.ogg
+
+# Models, runtime state and generated artifacts
+/models/
+*.onnx
+*.bin
+*.db
+*.sqlite*
+*.log
+/.venv/
+/build/
+/dist/
+/artifacts/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.DS_Store
