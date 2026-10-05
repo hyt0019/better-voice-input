@@ -6,6 +6,8 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QAbstractNativeEventFilter, QObject, QTimer, Signal
 
+from .shortcuts import HOTKEYS, INSERT_HOTKEY
+
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 user32.GetForegroundWindow.restype = wintypes.HWND
 user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
@@ -59,13 +61,6 @@ def is_password(target: InputTarget) -> bool:
     user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
     user32.GetClassNameW(target.focus, buffer, 256)
     return buffer.value.lower() == "edit" and bool(user32.GetWindowLongW(target.focus, -16) & 0x20)
-
-
-HOTKEYS = {
-    "Ctrl+Shift+Space": (0x0002 | 0x0004, 0x20),
-    "Ctrl+Alt+Space": (0x0002 | 0x0001, 0x20),
-    "Alt+Shift+Space": (0x0001 | 0x0004, 0x20),
-}
 
 
 def shortcut_held(name: str) -> bool:
@@ -153,7 +148,7 @@ def paste_text(text: str, target: InputTarget, clipboard, restore_callback=None)
     if not text.strip():
         raise PasteError("没有可输入的文字。")
     if not user32.IsWindow(target.window) or current_target() != target:
-        raise PasteError("输入位置已经变化，结果已保留。请回到目标输入框后按 Ctrl+Alt+V。")
+        raise PasteError(f"输入位置已经变化，结果已保留。请回到目标输入框后按 {INSERT_HOTKEY}。")
     if is_password(target):
         raise PasteError("密码输入框不支持自动输入，请切换到普通文本框。")
     class_name = ctypes.create_unicode_buffer(256)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from .settings import Settings, read_key, save_key
+from .shortcuts import RECORDING_CHOICES
 
 STYLE = """
 QWidget { font-family: 'DengXian', 'Microsoft YaHei UI'; font-size: 15px; color: #192C3A; }
@@ -75,9 +76,17 @@ class RecordingOverlay(QWidget):
     def __init__(self):
         super().__init__(
             None,
-            Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint,
+            Qt.WindowType.ToolTip
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.WindowDoesNotAcceptFocus,
         )
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.dismiss_timer = QTimer(self)
+        self.dismiss_timer.setSingleShot(True)
+        self.dismiss_timer.timeout.connect(self.hide)
         self.setStyleSheet(
             "QWidget { background: #E6EFF4; color: #192C3A; border-radius: 10px; } QLabel { border: none; }"
         )
@@ -85,8 +94,10 @@ class RecordingOverlay(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 12, 18, 12)
         self.label = QLabel("正在听  00:00")
+        self.label.setTextFormat(Qt.TextFormat.PlainText)
         self.label.setStyleSheet("font-size: 16px; font-weight: 600;")
-        self.hint = QLabel("再次按快捷键结束，Esc 取消")
+        self.hint = QLabel("松开快捷键结束，Esc 取消")
+        self.hint.setTextFormat(Qt.TextFormat.PlainText)
         self.hint.setStyleSheet("font-size: 12px; color: #596F7F;")
         self.level = QProgressBar()
         self.level.setTextVisible(False)
@@ -96,9 +107,17 @@ class RecordingOverlay(QWidget):
         layout.addWidget(self.level)
 
     def show_near_bottom(self):
+        self.dismiss_timer.stop()
         area = self.screen().availableGeometry()
         self.move(area.center().x() - self.width() // 2, area.bottom() - self.height() - 35)
         self.show()
+
+    def show_message(self, title: str, hint: str, milliseconds: int = 4500):
+        self.label.setText(title)
+        self.hint.setText(hint)
+        self.level.hide()
+        self.show_near_bottom()
+        self.dismiss_timer.start(milliseconds)
 
 
 class SettingsDialog(QDialog):
@@ -107,7 +126,7 @@ class SettingsDialog(QDialog):
         self.settings = settings
         self.updated = settings
         self.setWindowTitle("设置 · 好好说")
-        self.resize(580, 660)
+        self.resize(580, 700)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(16)
@@ -135,15 +154,20 @@ class SettingsDialog(QDialog):
             self.mic.setToolTip("未能列出麦克风，请检查音频设备。")
         form.addRow("麦克风", self.mic)
         self.hotkey = QComboBox()
-        self.hotkey.addItems(["Ctrl+Shift+Space", "Ctrl+Alt+Space", "Alt+Shift+Space"])
+        self.hotkey.addItems(RECORDING_CHOICES)
+        if settings.hotkey not in RECORDING_CHOICES:
+            self.hotkey.addItem(settings.hotkey)
         self.hotkey.setCurrentText(settings.hotkey)
         form.addRow("录音快捷键", self.hotkey)
         self.hold = QCheckBox("按住快捷键说话，松开结束")
         self.hold.setChecked(settings.hold_to_talk)
         form.addRow("录音方式", self.hold)
-        self.auto = QCheckBox("无疑点且输入位置未变化时，自动输入")
+        self.auto = QCheckBox("整理完成后自动输入到原来的光标位置")
         self.auto.setChecked(settings.auto_insert)
         form.addRow("输入方式", self.auto)
+        self.review = QCheckBox("有疑点时暂停自动输入，留待核对")
+        self.review.setChecked(settings.review_warnings)
+        form.addRow("核对方式", self.review)
         self.history = QCheckBox("在本机加密保留最近 7 天文字，最多 100 条")
         self.history.setChecked(settings.save_history)
         form.addRow("历史记录", self.history)
@@ -194,6 +218,7 @@ class SettingsDialog(QDialog):
                 hotkey=self.hotkey.currentText(),
                 hold_to_talk=self.hold.isChecked(),
                 auto_insert=self.auto.isChecked(),
+                review_warnings=self.review.isChecked(),
                 save_history=self.history.isChecked(),
                 glossary=words,
             )

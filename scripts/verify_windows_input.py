@@ -20,7 +20,7 @@ window.resize(600, 240)
 hotkeys = Hotkeys()
 app.installNativeEventFilter(hotkeys)
 result = {
-    "hotkey_registered": hotkeys.register(91, 2 | 4, 0x20),
+    "hotkey_registered": hotkeys.register(91, 1, ord("X")),
     "hotkey_received": False,
     "paste_matches": False,
     "clipboard_restored": False,
@@ -47,13 +47,11 @@ def trigger():
         result["error"] = "Test window is not focused or hotkey unavailable; no input was sent."
         finish()
         return
-    events = (INPUT * 6)()
-    for event, (key, flags) in zip(
-        events, ((0x11, 0), (0x10, 0), (0x20, 0), (0x20, 2), (0x10, 2), (0x11, 2)), strict=True
-    ):
+    events = (INPUT * 4)()
+    for event, (key, flags) in zip(events, ((0x12, 0), (ord("X"), 0), (ord("X"), 2), (0x12, 2)), strict=True):
         event.type = 1
         event.ki = KEYBDINPUT(key, 0, flags, 0, 0)
-    user32.SendInput(6, ctypes.byref(events), ctypes.sizeof(INPUT))
+    user32.SendInput(4, ctypes.byref(events), ctypes.sizeof(INPUT))
     QTimer.singleShot(300, paste)
 
 

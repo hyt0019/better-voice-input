@@ -30,9 +30,10 @@ from .audio import AudioError, Recorder
 from .models import models_ready
 from .pipeline import Events, Pipeline
 from .session import SessionGate
-from .settings import Settings, data_dir
+from .settings import Settings, data_dir, read_key
+from .shortcuts import DEFAULT_HOTKEY, HOTKEYS, INSERT_HOTKEY
 from .ui import STYLE, RecordingOverlay, SettingsDialog, app_icon, text_column
-from .windows import HOTKEYS, Hotkeys, PasteError, current_target, modifiers_held, paste_text, shortcut_held
+from .windows import Hotkeys, PasteError, current_target, modifiers_held, paste_text, shortcut_held
 
 
 class MainWindow(QMainWindow):
@@ -128,7 +129,7 @@ class MainWindow(QMainWindow):
         status_layout.setSpacing(7)
         self.status = QLabel("准备好，慢慢说")
         self.status.setObjectName("status")
-        self.hint = QLabel("按快捷键开始，再按一次结束。停顿和改口都没关系。")
+        self.hint = QLabel("按住快捷键说话，松开后自动整理并输入。停顿和改口都没关系。")
         self.hint.setObjectName("muted")
         self.hint.setWordWrap(True)
         self.meter = QProgressBar()
@@ -231,7 +232,8 @@ class MainWindow(QMainWindow):
         ready = models_ready(self.settings.models)
         self.download_button.setVisible(not ready)
         self.download_button.setEnabled(idle)
-        self.shortcut_label.setText(f"录音：{self.settings.hotkey}    输入已核对结果：Ctrl+Alt+V")
+        action = "按住说话，松开结束" if self.settings.hold_to_talk else "按一下开始，再按结束"
+        self.shortcut_label.setText(f"{self.settings.hotkey}：{action}    {INSERT_HOTKEY}：补输结果")
 
     def result_edited(self):
         if self.state == "idle":
@@ -245,11 +247,11 @@ class MainWindow(QMainWindow):
     def configure_hotkeys(self):
         if not self.hotkeys:
             return
-        modifiers, key = HOTKEYS.get(self.settings.hotkey, HOTKEYS["Ctrl+Shift+Space"])
+        modifiers, key = HOTKEYS.get(self.settings.hotkey, HOTKEYS[DEFAULT_HOTKEY])
         if not self.hotkeys.register(1, modifiers, key):
             self.set_notice("录音快捷键被其他程序占用，请在设置中更换。仍可点击开始录音。")
-        if not self.hotkeys.register(2, 0x0002 | 0x0001, ord("V")):
-            self.set_notice("Ctrl+Alt+V 被其他程序占用，请使用复制结果或输入按钮。")
+        if not self.hotkeys.register(2, 0x0001, ord("V")):
+            self.set_notice(f"{INSERT_HOTKEY} 被其他程序占用，请使用复制结果或输入按钮。")
 
     def on_hotkey(self, identifier: int):
         if identifier == 1:
@@ -259,6 +261,7 @@ class MainWindow(QMainWindow):
         elif identifier == 2 and self.state == "idle" and self.result.toPlainText().strip():
             target = current_target()
             if target and target.process != os.getpid():
+                self.from_hotkey = True
                 self.attempt_insert(self.gate.generation, target, explicit=True)
         elif identifier == 3:
             self.cancel()
@@ -281,11 +284,11 @@ class MainWindow(QMainWindow):
             return
         if self.state != "idle":
             return
-        if not models_ready(self.settings.models):
-            self.reveal()
-            self.set_notice("请先点击“下载语音模型”，首次需要下载约 240 MB。")
-            return
         self.from_hotkey = from_hotkey
+        if not models_ready(self.settings.models):
+            self.set_notice("请先点击“下载语音模型”，首次需要下载约 240 MB。")
+            self.feedback("语音模型未就绪", "点击托盘图标，下载语音模型")
+            return
         target = current_target() if from_hotkey else None
         self.target = target if target and target.process != os.getpid() else None
         self.begin("recording")
@@ -302,6 +305,9 @@ class MainWindow(QMainWindow):
             if from_hotkey and self.settings.hold_to_talk
             else "再次按快捷键结束，Esc 取消"
         )
+        self.overlay.label.setText("正在听  00:00")
+        self.overlay.level.setValue(0)
+        self.overlay.level.show()
         self.overlay.show_near_bottom()
 
     def stop_recording(self):
@@ -358,7 +364,8 @@ class MainWindow(QMainWindow):
         self.refresh_controls()
 
     def on_complete(self, job: int, data: dict):
-        if not self.gate.accepts(job):
+        # A duplicate completion must not reset the insert guard via textChanged.
+        if not self.gate.accepts(job) or self.state != "busy":
             return
         result = data["result"]
         self.original.setPlainText(result.original)
@@ -376,15 +383,29 @@ class MainWindow(QMainWindow):
             except Exception:
                 warnings.append("本次历史记录保存失败，当前结果仍可使用。")
         self.status.setText("整理好了，请核对" if warnings else "整理好了")
-        self.hint.setText("可以直接编辑结果，或回到输入框按 Ctrl+Alt+V。")
+        self.hint.setText(f"可以直接编辑结果，或回到输入框按 {INSERT_HOTKEY}。")
         self.set_notice("\n".join(warnings))
-        if self.target and self.settings.auto_insert and not warnings and not self.target_changed:
+        needs_review = bool(warnings) and self.settings.review_warnings
+        if self.target and self.settings.auto_insert and not needs_review and not self.target_changed:
             self.attempt_insert(job, self.target)
         else:
             if self.target_changed:
                 self.set_notice(
                     "\n".join(warnings + ["输入位置曾发生变化，结果已保留，请选择目标后手动输入。"])
                 )
+            if self.target_changed:
+                self.feedback("输入位置已变化，结果已保留", f"回到输入框按 {INSERT_HOTKEY} 补输")
+            elif needs_review:
+                self.feedback("结果待核对", "点击托盘图标查看原文和整理结果")
+            else:
+                self.feedback("整理好了，结果已保留", f"在目标输入框按 {INSERT_HOTKEY} 输入")
+
+    def feedback(self, title: str, hint: str, milliseconds: int = 4500):
+        """Global dictation never activates the main window, including failures."""
+        if self.from_hotkey:
+            self.overlay.show_message(title, hint, milliseconds)
+            self.tray.setToolTip(f"好好说 · {title}")
+        else:
             self.reveal()
 
     def attempt_insert(self, job: int, target, explicit: bool = False, tries: int = 0):
@@ -395,7 +416,7 @@ class MainWindow(QMainWindow):
             return
         if not explicit and self.target_changed:
             self.set_notice("输入位置已变化，请核对结果后手动输入。")
-            self.reveal()
+            self.feedback("输入位置已变化，结果已保留", f"回到输入框按 {INSERT_HOTKEY} 补输")
             return
         if not self.gate.claim_insert(job):
             return
@@ -404,16 +425,19 @@ class MainWindow(QMainWindow):
             self.status.setText("已提交输入")
             self.hint.setText("请在目标应用查看文字。可继续按录音快捷键输入下一段。")
             self.refresh_controls()
+            if self.from_hotkey:
+                self.feedback("已输入", "可以继续按住快捷键说下一段", 1200)
         except PasteError as exc:
             self.gate.inserted = False
             self.set_notice(str(exc))
             self.refresh_controls()
-            self.reveal()
+            self.feedback("未能自动输入，结果已保留", "点击托盘图标查看原因或复制结果")
 
     def schedule_manual_insert(self):
         if self.state != "idle" or not self.result.toPlainText().strip() or self.gate.inserted:
             return
         job = self.gate.generation
+        self.from_hotkey = False
         self.state = "waiting"
         self.status.setText("请在 3 秒内点击目标输入框")
         self.refresh_controls()
@@ -426,7 +450,7 @@ class MainWindow(QMainWindow):
             if target and target.process != os.getpid():
                 self.attempt_insert(job, target, explicit=True)
             else:
-                self.set_notice("未选中其他窗口，请切换到目标输入框后按 Ctrl+Alt+V。")
+                self.set_notice(f"未选中其他窗口，请切换到目标输入框后按 {INSERT_HOTKEY}。")
             self.refresh_controls()
 
         QTimer.singleShot(3000, insert)
@@ -436,6 +460,7 @@ class MainWindow(QMainWindow):
         if self.state != "idle" or not text:
             return
         self.target = None
+        self.from_hotkey = False
         job, cancel = self.begin("busy")
         self.pipeline.start(job, cancel, self.settings, text, "text")
 
@@ -456,6 +481,7 @@ class MainWindow(QMainWindow):
             self.set_notice("请先下载本地语音模型。")
             return
         self.target = None
+        self.from_hotkey = False
         job, cancel = self.begin("busy")
         self.original.clear()
         self.pipeline.start(job, cancel, self.settings, path, "file")
@@ -463,6 +489,8 @@ class MainWindow(QMainWindow):
     def download(self):
         if self.state != "idle":
             return
+        self.target = None
+        self.from_hotkey = False
         job, cancel = self.begin("download")
         self.status.setText("正在下载语音模型…")
         self.hint.setText("约 240 MB，仅首次需要。下载后会核对完整性。")
@@ -480,7 +508,7 @@ class MainWindow(QMainWindow):
             self.status.setText("本次处理未完成")
             self.hint.setText("原始文字已保留，可以复制或重新整理。")
             self.set_notice(message)
-            self.reveal()
+            self.feedback("本次处理未完成", "点击托盘图标查看原因或重试")
 
     def cancel(self):
         if self.state == "idle":
@@ -603,6 +631,7 @@ class MainWindow(QMainWindow):
         self.gate.cancel()
         self.recorder.cancel()
         self.timer.stop()
+        self.overlay.dismiss_timer.stop()
         self.overlay.close()
         self.tray.hide()
         if self.hotkeys:
@@ -618,19 +647,28 @@ class MainWindow(QMainWindow):
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--smoke", action="store_true", help="启动后自动退出，用于打包检查")
+    parser.add_argument("--background", action="store_true", help="配置就绪时仅在托盘运行")
     args = parser.parse_args()
     app = QApplication(sys.argv[:1])
     app.setApplicationName("BetterVoiceInput")
     app.setOrganizationName("BetterVoiceInput")
     app.setStyleSheet(STYLE)
     app.setWindowIcon(app_icon())
+    app.setQuitOnLastWindowClosed(False)
     lock = QLockFile(str(data_dir() / "application.lock"))
     lock.setStaleLockTime(0)
     if not args.smoke and not lock.tryLock(100):
         QMessageBox.information(None, "好好说", "程序已在运行，请点击系统托盘中的麦克风图标。")
         return 0
     window = MainWindow(native=not args.smoke)
-    window.show()
+    background_ready = (
+        models_ready(window.settings.models)
+        and bool(read_key())
+        and QSystemTrayIcon.isSystemTrayAvailable()
+        and (args.smoke or 1 in window.hotkeys.registered)
+    )
+    if not args.background or not background_ready:
+        window.show()
     if args.smoke:
         QTimer.singleShot(1500, window.quit_app)
     code = app.exec()

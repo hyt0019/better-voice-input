@@ -6,6 +6,8 @@ import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from .shortcuts import DEFAULT_HOTKEY, HOTKEYS
+
 SERVICE = "better-voice-input"
 
 
@@ -40,8 +42,9 @@ class Settings:
     model_dir: str = ""
     microphone: int | None = None
     auto_insert: bool = True
-    hotkey: str = "Ctrl+Shift+Space"
-    hold_to_talk: bool = False
+    hotkey: str = DEFAULT_HOTKEY
+    hold_to_talk: bool = True
+    review_warnings: bool = False
     save_history: bool = False
     glossary: list[str] = field(default_factory=lambda: ["DeepSeek", "API", "Windows", "Ctrl", "Shift"])
     api_timeout: float = 25.0
@@ -70,7 +73,7 @@ class Settings:
                         values[key] = [word[:80] for word in value[:100]]
                 elif type(value) is type(getattr(defaults, key)):
                     values[key] = value
-            if values.get("hotkey") not in (None, "Ctrl+Shift+Space", "Ctrl+Alt+Space", "Alt+Shift+Space"):
+            if "hotkey" in values and values["hotkey"] not in HOTKEYS:
                 values.pop("hotkey")
             if not 1 <= values.get("api_timeout", 25) <= 120:
                 values.pop("api_timeout", None)
