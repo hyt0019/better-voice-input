@@ -35,7 +35,7 @@
 
 - 设置：`%LOCALAPPDATA%/BetterVoiceInput/settings.json`，不包含密钥。
 - 可选加密历史：同目录 `history.json`。
-- 模型：优先使用可执行文件旁的 `models`，否则使用上述用户目录下的 `models`；开发机可在设置文件的 `model_dir` 指向已下载目录。
+- 模型：优先使用设置中的 `model_dir`，其次是可执行文件旁的 `models`；从项目 `dist/BetterVoiceInput` 运行时也会查找项目根目录的 `models`。最后使用上述用户目录下的 `models`。本机模型已安装在项目根目录，不需要再次下载。
 - Key：Windows 凭据管理器，服务名 `better-voice-input`；开发测试还可使用 `DEEPSEEK_API_KEY` 或项目根目录的 `deepseek api key.txt`。
 - 音频在本机识别。转写和相关词库通过 HTTPS 发送至 DeepSeek，需要联网且账户有余额。
 

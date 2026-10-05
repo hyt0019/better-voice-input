@@ -22,9 +22,15 @@ def data_dir() -> Path:
 
 
 def default_model_dir() -> Path:
-    local = project_root() / "models"
-    if local.exists():
-        return local
+    root = project_root()
+    candidates = [root / "models"]
+    # The local build lives in <project>/dist/BetterVoiceInput; reuse the
+    # project's models without bundling or downloading a second copy.
+    if getattr(sys, "frozen", False) and root.parent.name.lower() == "dist":
+        candidates.append(root.parent.parent / "models")
+    for local in candidates:
+        if local.is_dir():
+            return local
     return data_dir() / "models"
 
 
