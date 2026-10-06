@@ -12,7 +12,7 @@ from better_voice_input.app import MainWindow
 from better_voice_input.core import CleanupResult
 from better_voice_input.session import SessionGate
 from better_voice_input.settings import Settings
-from better_voice_input.ui import STYLE
+from better_voice_input.ui import STYLE, SettingsDialog
 from better_voice_input.windows import InputTarget, PasteError
 
 
@@ -224,6 +224,36 @@ def test_settings_roundtrip_contains_no_key(tmp_path):
     settings.save(path)
     assert Settings.load(path) == settings
     assert "api_key" not in path.read_text(encoding="utf-8")
+
+
+def test_settings_dialog_startup_choice_is_optional_and_saved(window):
+    dialog = SettingsDialog(Settings(), window)
+    assert not dialog.startup.isChecked()
+    dialog.startup.setChecked(True)
+    dialog.save()
+    assert dialog.updated.start_on_login
+    dialog.close()
+
+
+def test_failed_startup_change_keeps_existing_window_settings(window, monkeypatch):
+    from better_voice_input.startup import StartupError
+
+    class Dialog:
+        def __init__(self, settings, parent):
+            self.updated = Settings(start_on_login=True)
+
+        def exec(self):
+            return 1  # QDialog.Accepted
+
+    def deny_save(_):
+        raise StartupError("无法修改开机自启动设置")
+
+    monkeypatch.setattr("better_voice_input.app.SettingsDialog", Dialog)
+    monkeypatch.setattr("better_voice_input.app.startup_enabled", lambda: False)
+    monkeypatch.setattr("better_voice_input.app.save_settings_with_startup", deny_save)
+    window.open_settings()
+    assert not window.settings.start_on_login
+    assert "无法修改开机自启动" in window.notice.text()
 
 
 def test_cancelled_pipeline_never_calls_api(window, monkeypatch):

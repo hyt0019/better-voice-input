@@ -46,6 +46,7 @@ class Settings:
     hold_to_talk: bool = True
     review_warnings: bool = False
     save_history: bool = False
+    start_on_login: bool = False
     glossary: list[str] = field(default_factory=lambda: ["DeepSeek", "API", "Windows", "Ctrl", "Shift"])
     api_timeout: float = 25.0
 

@@ -4,6 +4,7 @@ import argparse
 import os
 import sys
 import time
+from dataclasses import replace
 
 from PySide6.QtCore import QLockFile, QTimer, Qt
 from PySide6.QtGui import QAction, QKeySequence, QShortcut
@@ -32,6 +33,7 @@ from .pipeline import Events, Pipeline
 from .session import SessionGate
 from .settings import Settings, data_dir, read_key
 from .shortcuts import DEFAULT_HOTKEY, HOTKEYS, INSERT_HOTKEY
+from .startup import StartupError, save_settings_with_startup, startup_enabled
 from .ui import STYLE, RecordingOverlay, SettingsDialog, app_icon, text_column
 from .windows import Hotkeys, PasteError, current_target, modifiers_held, paste_text, shortcut_held
 
@@ -536,7 +538,12 @@ class MainWindow(QMainWindow):
             self.status.setText("已复制结果" if result else "已复制原文")
 
     def open_settings(self):
-        dialog = SettingsDialog(self.settings, self)
+        try:
+            current = replace(self.settings, start_on_login=startup_enabled())
+        except StartupError as exc:
+            self.set_notice(str(exc))
+            return
+        dialog = SettingsDialog(current, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             new = dialog.updated
             if self.hotkeys and new.hotkey != self.settings.hotkey:
@@ -546,12 +553,16 @@ class MainWindow(QMainWindow):
                     self.set_notice("所选快捷键已被占用，设置未修改，请选择其他组合。")
                     return
             try:
-                new.save()
+                save_settings_with_startup(new)
                 self.settings = new
                 self.configure_hotkeys()
                 self.refresh_controls()
                 self.status.setText("设置已保存")
+            except StartupError as exc:
+                self.configure_hotkeys()
+                self.set_notice(str(exc))
             except OSError:
+                self.configure_hotkeys()
                 self.set_notice("无法写入本地设置，请检查用户目录权限。")
 
     def reveal(self):

@@ -126,7 +126,7 @@ class SettingsDialog(QDialog):
         self.settings = settings
         self.updated = settings
         self.setWindowTitle("设置 · 好好说")
-        self.resize(580, 700)
+        self.resize(580, 740)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(16)
@@ -171,6 +171,9 @@ class SettingsDialog(QDialog):
         self.history = QCheckBox("在本机加密保留最近 7 天文字，最多 100 条")
         self.history.setChecked(settings.save_history)
         form.addRow("历史记录", self.history)
+        self.startup = QCheckBox("开机自启动，登录 Windows 后在托盘运行")
+        self.startup.setChecked(settings.start_on_login)
+        form.addRow("启动方式", self.startup)
         layout.addLayout(form)
         label = QLabel("个人词库")
         label.setObjectName("section")
@@ -220,6 +223,7 @@ class SettingsDialog(QDialog):
                 auto_insert=self.auto.isChecked(),
                 review_warnings=self.review.isChecked(),
                 save_history=self.history.isChecked(),
+                start_on_login=self.startup.isChecked(),
                 glossary=words,
             )
             self.accept()
