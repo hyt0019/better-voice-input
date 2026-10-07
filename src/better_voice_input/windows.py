@@ -39,6 +39,16 @@ class InputTarget:
     process: int
 
 
+def same_input_field(left: InputTarget | None, right: InputTarget | None) -> bool:
+    # Caret rectangles can change during blinking, scrolling, and UI layout.
+    # Only the foreground window, focused control, and process identify the field.
+    return bool(
+        left
+        and right
+        and (left.window, left.focus, left.process) == (right.window, right.focus, right.process)
+    )
+
+
 def current_target() -> InputTarget | None:
     window = user32.GetForegroundWindow()
     if not window:
@@ -147,7 +157,7 @@ def paste_text(text: str, target: InputTarget, clipboard, restore_callback=None)
 
     if not text.strip():
         raise PasteError("没有可输入的文字。")
-    if not user32.IsWindow(target.window) or current_target() != target:
+    if not user32.IsWindow(target.window) or not same_input_field(current_target(), target):
         raise PasteError(f"输入位置已经变化，结果已保留。请回到目标输入框后按 {INSERT_HOTKEY}。")
     if is_password(target):
         raise PasteError("密码输入框不支持自动输入，请切换到普通文本框。")
@@ -171,7 +181,7 @@ def paste_text(text: str, target: InputTarget, clipboard, restore_callback=None)
         if restore_callback:
             restore_callback()
 
-    if current_target() != target:
+    if not same_input_field(current_target(), target):
         restore()
         raise PasteError("输入位置已经变化，已取消自动输入。")
     events = (INPUT * 4)()

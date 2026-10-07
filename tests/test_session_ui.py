@@ -55,8 +55,7 @@ def test_cancel_does_not_allow_late_result_to_replace_text(window):
     assert window.state == "idle"
 
 
-def test_optional_review_pauses_input_without_showing_main_window(window, monkeypatch):
-    window.settings.review_warnings = True
+def test_long_ambiguous_result_is_inserted_without_review(window, monkeypatch):
     window.from_hotkey = True
     calls = []
     monkeypatch.setattr(window, "attempt_insert", lambda *args: calls.append(args))
@@ -66,28 +65,14 @@ def test_optional_review_pauses_input_without_showing_main_window(window, monkey
     window.on_complete(
         job,
         {
-            "result": CleanupResult("预算不是5000", "预算5000", ("核对数字",)),
+            "result": CleanupResult("预算不是5000。" * 100, "预算不是5000。" * 100, ("核对数字",)),
             "asr_seconds": 1,
-            "duration": 10,
+            "duration": 110,
         },
     )
-    assert not calls
+    assert calls == [(job, window.target)]
     assert "核对数字" in window.notice.text()
-    assert window.result.toPlainText() == "预算5000"
-    assert window.overlay.isVisible()
-
-
-def test_target_change_prevents_automatic_input(window, monkeypatch):
-    window.from_hotkey = True
-    calls = []
-    monkeypatch.setattr(window, "attempt_insert", lambda *args: calls.append(args))
-    monkeypatch.setattr(window, "reveal", lambda: pytest.fail("Focus change must not open main window"))
-    job, _ = window.begin("busy")
-    window.target = object()
-    window.target_changed = True
-    window.on_complete(job, {"result": CleanupResult("你好", "你好。"), "asr_seconds": 1, "duration": 1})
-    assert not calls
-    assert "输入位置" in window.notice.text()
+    assert window.result.toPlainText() == "预算不是5000。" * 100
 
 
 def test_hold_release_cleanup_and_automatic_input_stay_in_background(window, monkeypatch):
@@ -119,6 +104,12 @@ def test_hold_release_cleanup_and_automatic_input_stay_in_background(window, mon
     assert window.target == target
     assert not window.isVisible()
 
+    # A temporarily unavailable foreground snapshot during a long recording
+    # must not permanently prevent insertion when the original field returns.
+    window.recorder.started = time.monotonic() - 75
+    monkeypatch.setattr("better_voice_input.app.current_target", lambda: None)
+    window.tick()
+    monkeypatch.setattr("better_voice_input.app.current_target", lambda: target)
     held[0] = False
     window.tick()
     window.tick()
@@ -220,7 +211,7 @@ def test_clear_invalidates_queued_tasks(window):
 
 def test_settings_roundtrip_contains_no_key(tmp_path):
     path = tmp_path / "settings.json"
-    settings = Settings(glossary=["项目甲"], hold_to_talk=True, auto_insert=False)
+    settings = Settings(glossary=["项目甲"], hold_to_talk=True)
     settings.save(path)
     assert Settings.load(path) == settings
     assert "api_key" not in path.read_text(encoding="utf-8")
@@ -263,3 +254,64 @@ def test_cancelled_pipeline_never_calls_api(window, monkeypatch):
     event.set()
     window.pipeline._run(1, event, Settings(), "一段文字", "text")
     assert not calls
+
+
+@pytest.mark.parametrize("cancelled", [False, True])
+def test_audio_api_failure_inserts_original_unless_cancelled(window, monkeypatch, cancelled):
+    from types import SimpleNamespace
+    from better_voice_input.cleanup import Cancelled, CleanupError
+
+    calls = []
+    source = "周三或者周四，还没确定。" * 60
+    window.from_hotkey = True
+    window.target = object()
+    job, cancel = window.begin("busy")
+    window.pipeline.recognizer = SimpleNamespace(
+        directory=window.settings.models, transcribe=lambda *args: source
+    )
+
+    def clean(*args):
+        if cancelled:
+            cancel.set()
+            raise Cancelled("取消")
+        raise CleanupError("返回内容不完整")
+
+    monkeypatch.setattr("better_voice_input.pipeline.read_key", lambda *args, **kwargs: "test")
+    monkeypatch.setattr(
+        "better_voice_input.pipeline.DeepSeekCleaner", lambda *args, **kwargs: SimpleNamespace(clean=clean)
+    )
+    monkeypatch.setattr(window, "attempt_insert", lambda *args: calls.append(args))
+    monkeypatch.setattr(window, "reveal", lambda: pytest.fail("No review window during dictation"))
+    window.pipeline._run(job, cancel, window.settings, SimpleNamespace(size=120 * 16000), "audio")
+    assert bool(calls) is not cancelled
+    if not cancelled:
+        assert window.result.toPlainText() == source
+        assert "识别原文" in window.notice.text()
+
+
+@pytest.mark.parametrize("change", ["caret", "window", "focus", "process", "unavailable"])
+def test_paste_ignores_caret_geometry_but_checks_destination(window, monkeypatch, change):
+    from dataclasses import replace
+    from better_voice_input import windows
+
+    target = InputTarget(100, 101, (1, 2, 3, 4), 200)
+    changes = {"caret": (0, 0, 0, 0), "window": 102, "focus": 103, "process": 201}
+    current = None if change == "unavailable" else replace(target, **{change: changes[change]})
+    sent = []
+    clipboard = QApplication.clipboard()
+    clipboard.setText("previous")
+    monkeypatch.setattr(windows, "current_target", lambda: current)
+    monkeypatch.setattr(windows, "is_password", lambda _: False)
+    monkeypatch.setattr(windows, "modifiers_held", lambda: False)
+    monkeypatch.setattr(windows.user32, "IsWindow", lambda _: True)
+    monkeypatch.setattr(windows.user32, "GetClassNameW", lambda *args: 0)
+    monkeypatch.setattr(windows.user32, "SendInput", lambda count, *args: sent.append(count) or count)
+    monkeypatch.setattr(windows.QTimer, "singleShot", lambda *args: None)
+    if change == "caret":
+        windows.paste_text("较长的整理结果。" * 100, target, clipboard)
+        assert sent == [4]
+    else:
+        with pytest.raises(PasteError, match="输入位置"):
+            windows.paste_text("结果", target, clipboard)
+        assert not sent
+        assert clipboard.text() == "previous"

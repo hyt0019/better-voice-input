@@ -48,7 +48,6 @@ class MainWindow(QMainWindow):
         self.recorder = Recorder(self.events.level.emit)
         self.state = "idle"
         self.target = None
-        self.target_changed = False
         self.from_hotkey = False
         self.extra_warnings: list[str] = []
         self.quitting = False
@@ -264,7 +263,7 @@ class MainWindow(QMainWindow):
             target = current_target()
             if target and target.process != os.getpid():
                 self.from_hotkey = True
-                self.attempt_insert(self.gate.generation, target, explicit=True)
+                self.attempt_insert(self.gate.generation, target)
         elif identifier == 3:
             self.cancel()
 
@@ -273,7 +272,6 @@ class MainWindow(QMainWindow):
         self.state = kind
         self.set_notice()
         self.extra_warnings = []
-        self.target_changed = False
         self.result.clear()
         if self.hotkeys:
             self.hotkeys.register(3, 0, 0x1B)
@@ -339,9 +337,6 @@ class MainWindow(QMainWindow):
                 self.set_notice("已达到 2 分钟上限，正在处理刚才的录音。")
             elif self.from_hotkey and self.settings.hold_to_talk and not shortcut_held(self.settings.hotkey):
                 self.stop_recording()
-        if self.state in ("recording", "busy") and self.target:
-            if current_target() != self.target:
-                self.target_changed = True
 
     def on_level(self, level: float):
         if self.state == "recording":
@@ -384,23 +379,13 @@ class MainWindow(QMainWindow):
                 HistoryStore().append(result.original, result.text)
             except Exception:
                 warnings.append("本次历史记录保存失败，当前结果仍可使用。")
-        self.status.setText("整理好了，请核对" if warnings else "整理好了")
+        self.status.setText("识别原文已就绪" if data.get("used_original") else "整理好了")
         self.hint.setText(f"可以直接编辑结果，或回到输入框按 {INSERT_HOTKEY}。")
         self.set_notice("\n".join(warnings))
-        needs_review = bool(warnings) and self.settings.review_warnings
-        if self.target and self.settings.auto_insert and not needs_review and not self.target_changed:
+        if self.from_hotkey and self.target:
             self.attempt_insert(job, self.target)
         else:
-            if self.target_changed:
-                self.set_notice(
-                    "\n".join(warnings + ["输入位置曾发生变化，结果已保留，请选择目标后手动输入。"])
-                )
-            if self.target_changed:
-                self.feedback("输入位置已变化，结果已保留", f"回到输入框按 {INSERT_HOTKEY} 补输")
-            elif needs_review:
-                self.feedback("结果待核对", "点击托盘图标查看原文和整理结果")
-            else:
-                self.feedback("整理好了，结果已保留", f"在目标输入框按 {INSERT_HOTKEY} 输入")
+            self.feedback("整理好了，结果已保留", f"在目标输入框按 {INSERT_HOTKEY} 输入")
 
     def feedback(self, title: str, hint: str, milliseconds: int = 4500):
         """Global dictation never activates the main window, including failures."""
@@ -410,15 +395,11 @@ class MainWindow(QMainWindow):
         else:
             self.reveal()
 
-    def attempt_insert(self, job: int, target, explicit: bool = False, tries: int = 0):
+    def attempt_insert(self, job: int, target, tries: int = 0):
         if not self.gate.accepts(job) or self.gate.inserted or self.state != "idle":
             return
         if modifiers_held() and tries < 30:
-            QTimer.singleShot(60, lambda: self.attempt_insert(job, target, explicit, tries + 1))
-            return
-        if not explicit and self.target_changed:
-            self.set_notice("输入位置已变化，请核对结果后手动输入。")
-            self.feedback("输入位置已变化，结果已保留", f"回到输入框按 {INSERT_HOTKEY} 补输")
+            QTimer.singleShot(60, lambda: self.attempt_insert(job, target, tries + 1))
             return
         if not self.gate.claim_insert(job):
             return
@@ -450,7 +431,7 @@ class MainWindow(QMainWindow):
             self.state = "idle"
             target = current_target()
             if target and target.process != os.getpid():
-                self.attempt_insert(job, target, explicit=True)
+                self.attempt_insert(job, target)
             else:
                 self.set_notice(f"未选中其他窗口，请切换到目标输入框后按 {INSERT_HOTKEY}。")
             self.refresh_controls()

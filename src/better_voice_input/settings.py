@@ -41,10 +41,8 @@ class Settings:
     model: str = "deepseek-flash"
     model_dir: str = ""
     microphone: int | None = None
-    auto_insert: bool = True
     hotkey: str = DEFAULT_HOTKEY
     hold_to_talk: bool = True
-    review_warnings: bool = False
     save_history: bool = False
     start_on_login: bool = False
     glossary: list[str] = field(default_factory=lambda: ["DeepSeek", "API", "Windows", "Ctrl", "Shift"])

@@ -162,12 +162,7 @@ class SettingsDialog(QDialog):
         self.hold = QCheckBox("按住快捷键说话，松开结束")
         self.hold.setChecked(settings.hold_to_talk)
         form.addRow("录音方式", self.hold)
-        self.auto = QCheckBox("整理完成后自动输入到原来的光标位置")
-        self.auto.setChecked(settings.auto_insert)
-        form.addRow("输入方式", self.auto)
-        self.review = QCheckBox("有疑点时暂停自动输入，留待核对")
-        self.review.setChecked(settings.review_warnings)
-        form.addRow("核对方式", self.review)
+        form.addRow("输入方式", QLabel("快捷键录音后直接输入，疑点不暂停"))
         self.history = QCheckBox("在本机加密保留最近 7 天文字，最多 100 条")
         self.history.setChecked(settings.save_history)
         form.addRow("历史记录", self.history)
@@ -220,8 +215,6 @@ class SettingsDialog(QDialog):
                 microphone=self.mic.currentData(),
                 hotkey=self.hotkey.currentText(),
                 hold_to_talk=self.hold.isChecked(),
-                auto_insert=self.auto.isChecked(),
-                review_warnings=self.review.isChecked(),
                 save_history=self.history.isChecked(),
                 start_on_login=self.startup.isChecked(),
                 glossary=words,

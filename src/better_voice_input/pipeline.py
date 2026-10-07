@@ -7,7 +7,8 @@ from pathlib import Path
 from PySide6.QtCore import QObject, Signal
 
 from .audio import decode_audio
-from .cleanup import Cancelled, DeepSeekCleaner
+from .cleanup import Cancelled, CleanupError, DeepSeekCleaner
+from .core import CleanupResult
 from .models import download_models
 from .settings import Settings, read_key
 
@@ -67,18 +68,40 @@ class Pipeline:
             if cancel.is_set():
                 raise Cancelled("已取消。")
             self.events.stage.emit(job, "正在整理你的表达…")
-            result = DeepSeekCleaner(read_key(), settings.model, settings.api_timeout).clean(
-                text, settings.glossary, cancel
-            )
+            used_original = False
+            cleanup_started = time.monotonic()
+            try:
+                result = DeepSeekCleaner(read_key(), settings.model, settings.api_timeout).clean(
+                    text, settings.glossary, cancel
+                )
+            except Cancelled:
+                raise
+            except CleanupError as exc:
+                if kind == "text":
+                    raise
+                used_original = True
+                result = CleanupResult(
+                    text,
+                    text,
+                    (f"API 整理未完成，已使用识别原文。{exc}",),
+                    elapsed=time.monotonic() - cleanup_started,
+                )
+            if cancel.is_set():
+                raise Cancelled("已取消。")
             self.events.completed.emit(
-                job, {"result": result, "asr_seconds": asr_seconds, "duration": duration}
+                job,
+                {
+                    "result": result,
+                    "asr_seconds": asr_seconds,
+                    "duration": duration,
+                    "used_original": used_original,
+                },
             )
         except Cancelled:
             return
         except Exception as exc:
             if not cancel.is_set():
                 from .audio import AudioError
-                from .cleanup import CleanupError
                 from .models import ModelError
 
                 message = (

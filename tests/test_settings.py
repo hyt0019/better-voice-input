@@ -4,15 +4,20 @@ from better_voice_input import settings
 def test_default_shortcut_is_two_keys_and_hold_to_talk_is_enabled():
     value = settings.Settings()
     assert value.hotkey == "Alt+X"
-    assert value.hold_to_talk and value.auto_insert
-    assert not value.review_warnings
+    assert value.hold_to_talk
 
 
-def test_two_key_shortcut_and_review_preference_survive_reload(tmp_path):
-    value = settings.Settings(hotkey="Alt+C", review_warnings=True)
+def test_two_key_shortcut_survives_reload(tmp_path):
+    value = settings.Settings(hotkey="Alt+C")
     path = tmp_path / "settings.json"
     value.save(path)
     assert settings.Settings.load(path) == value
+
+
+def test_legacy_preview_preferences_do_not_disable_direct_input(tmp_path):
+    path = tmp_path / "settings.json"
+    path.write_text('{"auto_insert":false,"review_warnings":true}', encoding="utf-8")
+    assert settings.Settings.load(path) == settings.Settings()
 
 
 def test_packaged_build_finds_project_models_without_saved_config(tmp_path, monkeypatch):
