@@ -7,6 +7,11 @@ from dataclasses import dataclass, field
 from pydantic import BaseModel, ConfigDict, Field
 
 
+def single_line_text(text: str) -> str:
+    """Keep words separated while removing line breaks and terminal control characters."""
+    return re.sub(r"[\s\x00-\x1f\x7f-\x9f]+", " ", text).strip()
+
+
 class Edit(BaseModel):
     model_config = ConfigDict(extra="forbid")
     source: str = Field(min_length=1, max_length=4000)
@@ -29,6 +34,9 @@ class CleanupResult:
     edits: tuple[Edit, ...] = ()
     elapsed: float = 0.0
     usage: dict = field(default_factory=dict)
+
+    def __post_init__(self):
+        object.__setattr__(self, "text", single_line_text(self.text))
 
     @property
     def needs_review(self) -> bool:

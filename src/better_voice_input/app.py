@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from .audio import AudioError, Recorder
+from .core import single_line_text
 from .models import models_ready
 from .pipeline import Events, Pipeline
 from .session import SessionGate
@@ -513,7 +514,7 @@ class MainWindow(QMainWindow):
         self.stats.setText("默认仅保留当前会话；可在设置中开启本机加密历史。")
 
     def copy_text(self, result: bool):
-        text = self.result.toPlainText() if result else self.original.toPlainText()
+        text = single_line_text(self.result.toPlainText() if result else self.original.toPlainText())
         if text:
             QApplication.clipboard().setText(text)
             self.status.setText("已复制结果" if result else "已复制原文")
@@ -586,7 +587,7 @@ class MainWindow(QMainWindow):
             self.gate.begin()
             self.target = None
             self.original.setPlainText(rows[index]["original"])
-            self.result.setPlainText(rows[index]["text"])
+            self.result.setPlainText(single_line_text(rows[index]["text"]))
             self.status.setText("已载入历史，请核对后使用")
             self.set_notice("这是一条历史记录，请检查日期、人物和条件是否仍适用。")
             dialog.accept()

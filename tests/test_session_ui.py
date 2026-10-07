@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
 from better_voice_input.app import MainWindow
-from better_voice_input.core import CleanupResult
+from better_voice_input.core import CleanupResult, single_line_text
 from better_voice_input.session import SessionGate
 from better_voice_input.settings import Settings
 from better_voice_input.ui import STYLE, SettingsDialog
@@ -263,7 +263,7 @@ def test_audio_api_failure_inserts_original_unless_cancelled(window, monkeypatch
     from better_voice_input.cleanup import Cancelled, CleanupError
 
     calls = []
-    source = "周三或者周四，还没确定。" * 60
+    source = "周三或者周四，还没确定。\n" * 60
     window.from_hotkey = True
     window.target = object()
     job, cancel = window.begin("busy")
@@ -286,7 +286,7 @@ def test_audio_api_failure_inserts_original_unless_cancelled(window, monkeypatch
     window.pipeline._run(job, cancel, window.settings, SimpleNamespace(size=120 * 16000), "audio")
     assert bool(calls) is not cancelled
     if not cancelled:
-        assert window.result.toPlainText() == source
+        assert window.result.toPlainText() == single_line_text(source)
         assert "识别原文" in window.notice.text()
 
 
@@ -334,3 +334,50 @@ def test_paste_ignores_caret_geometry_but_checks_destination(window, monkeypatch
             windows.paste_text("结果", target, clipboard)
         assert not sent
         assert clipboard.text() == "previous"
+
+
+@pytest.mark.parametrize("result", [False, True])
+def test_copy_edited_text_is_always_single_line(window, result):
+    editor = window.result if result else window.original
+    editor.setPlainText("第一句。\n第二句。\t结束。\n")
+    window.copy_text(result)
+    assert QApplication.clipboard().text() == "第一句。 第二句。 结束。"
+
+
+@pytest.mark.parametrize(
+    "class_name", ["ConsoleWindowClass", "CASCADIA_HOSTING_WINDOW_CLASS", "mintty", "Chrome_WidgetWin_1"]
+)
+def test_terminal_and_regular_paste_are_single_line_without_enter(window, monkeypatch, class_name):
+    import ctypes
+    from better_voice_input import windows
+
+    target = InputTarget(100, 101, (0, 0, 0, 0), 200)
+    clipboard = QApplication.clipboard()
+    clipboard.setText("previous clipboard")
+    sent = []
+    timers = []
+
+    def get_class(_window, buffer, _size):
+        buffer.value = class_name
+        return len(class_name)
+
+    def send(count, pointer, _size):
+        events = ctypes.cast(pointer, ctypes.POINTER(windows.INPUT))
+        sent.extend((events[i].ki.wVk, events[i].ki.dwFlags) for i in range(count))
+        return count
+
+    monkeypatch.setattr(windows, "current_target", lambda: target)
+    monkeypatch.setattr(windows, "is_password", lambda _: False)
+    monkeypatch.setattr(windows, "modifiers_held", lambda: False)
+    monkeypatch.setattr(windows.user32, "IsWindow", lambda _: True)
+    monkeypatch.setattr(windows.user32, "GetClassNameW", get_class)
+    monkeypatch.setattr(windows.user32, "GetClipboardSequenceNumber", lambda: 123)
+    monkeypatch.setattr(windows.user32, "SendInput", send)
+    monkeypatch.setattr(windows.QTimer, "singleShot", lambda _ms, callback: timers.append(callback))
+    windows.paste_text("第一句。\r\n第二句。\u2028结束。\t\x00\x1b\n", target, clipboard)
+    assert clipboard.text() == "第一句。 第二句。 结束。"
+    modifier, key = (0x11, 0x56) if class_name == "Chrome_WidgetWin_1" else (0x10, 0x2D)
+    assert sent == [(modifier, 0), (key, 0), (key, 2), (modifier, 2)]
+    assert all(key != 0x0D for key, _flags in sent)
+    timers[0]()
+    assert clipboard.text() == "previous clipboard"

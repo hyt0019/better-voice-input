@@ -26,7 +26,7 @@ window.grab().save(str(output / "main-empty.png"))
 window.original.setPlainText(
     "嗯，我我我想明天九点，不对，十点和张三开会。地点在上海。\n对了，前面地点说错了，是杭州。周三或者周四上线吧，还没确定。"
 )
-window.result.setPlainText("我想明天十点和张三在杭州开会。\n周三或者周四上线吧，还没确定。")
+window.result.setPlainText("我想明天十点和张三在杭州开会。周三或者周四上线吧，还没确定。")
 window.status.setText("整理好了")
 window.stats.setText("本地识别 0.8 秒    文字整理 2.1 秒    本次 520 tokens")
 app.processEvents()

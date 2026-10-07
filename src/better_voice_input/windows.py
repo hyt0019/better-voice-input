@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QAbstractNativeEventFilter, QObject, QTimer, Signal
 
+from .core import single_line_text
 from .shortcuts import HOTKEYS, INSERT_HOTKEY
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -155,7 +156,9 @@ def paste_text(text: str, target: InputTarget, clipboard, restore_callback=None)
     """Paste once, with a focus check immediately before the Win32 input call."""
     from PySide6.QtCore import QMimeData
 
-    if not text.strip():
+    # Apply at the final boundary too: edits and older history can contain newlines.
+    text = single_line_text(text)
+    if not text:
         raise PasteError("没有可输入的文字。")
     if not user32.IsWindow(target.window) or not same_input_field(current_target(), target):
         raise PasteError(f"输入位置已经变化，结果已保留。请回到目标输入框后按 {INSERT_HOTKEY}。")
@@ -163,8 +166,9 @@ def paste_text(text: str, target: InputTarget, clipboard, restore_callback=None)
         raise PasteError("密码输入框不支持自动输入，请切换到普通文本框。")
     class_name = ctypes.create_unicode_buffer(256)
     user32.GetClassNameW(target.window, class_name, 256)
-    if class_name.value.lower() in ("consolewindowclass", "cascadia_hosting_window_class", "mintty"):
-        raise PasteError("终端窗口请使用复制结果后手动粘贴，避免多行文字被当作命令执行。")
+    terminal = class_name.value.lower() in (
+        "consolewindowclass", "cascadia_hosting_window_class", "mintty"
+    )
     if modifiers_held():
         raise PasteError("请松开快捷键后重试输入。")
     original = QMimeData()
@@ -185,7 +189,11 @@ def paste_text(text: str, target: InputTarget, clipboard, restore_callback=None)
         restore()
         raise PasteError("输入位置已经变化，已取消自动输入。")
     events = (INPUT * 4)()
-    for event, (key, flags) in zip(events, ((0x11, 0), (0x56, 0), (0x56, 2), (0x11, 2)), strict=True):
+    # Shift+Insert also works in mintty, where Ctrl+V is not normally paste.
+    # Never send Enter; terminal users decide when to execute/submit the text.
+    modifier, paste_key = (0x10, 0x2D) if terminal else (0x11, 0x56)
+    keys = ((modifier, 0), (paste_key, 0), (paste_key, 2), (modifier, 2))
+    for event, (key, flags) in zip(events, keys, strict=True):
         event.type = 1
         event.ki = KEYBDINPUT(key, 0, flags, 0, 0)
     sent = user32.SendInput(4, ctypes.byref(events), ctypes.sizeof(INPUT))
