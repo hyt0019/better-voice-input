@@ -10,7 +10,7 @@
 
 首次在其他电脑运行：
 
-1. 打开“设置”，填写自己的 DeepSeek API Key 并保存。密钥进入 Windows 凭据管理器。
+1. 打开“设置”，填写 API 地址、该服务的 API Key 和模型名称，保存后生效。密钥进入 Windows 凭据管理器。
 2. 点击“下载语音模型”，约 240 MB；下载文件会校验完整性。
 3. 选择麦克风。Windows 设置 → 隐私和安全性 → 麦克风，需要允许桌面应用访问。
 4. 点击普通文本输入框，按住 `Alt+X` 说话，说完松开。等待整理完成后自动输入。
@@ -18,6 +18,16 @@
 默认仅保存当前会话。关闭主窗口会缩小到托盘，右键托盘图标选择“退出”才会结束程序。
 
 设置 → 启动方式中可勾选“开机自启动，登录 Windows 后在托盘运行”，点击“保存设置”后生效。默认关闭；取消勾选并保存即可关闭。该选项仅影响当前 Windows 用户。移动程序文件夹后，打开新的程序并重新保存设置，以更新启动位置。
+
+## API 配置
+
+支持兼容 Chat Completions 的 API，不限定服务商或模型。填写服务商提供的三个值：
+
+- **API 地址**：Base URL，例如 `https://api.example.com/v1`，也可填写完整的 `/chat/completions` 地址。请求会自动补全路径，不会重复添加。
+- **API Key**：当前地址对应的密钥，按地址分别保存。更换地址时输入框会清空，原服务的密钥仍保留；已有该地址的密钥时可以留空。
+- **模型名称**：服务商提供的模型 ID。**请求超时**可调整为 1～120 秒。
+
+原有 DeepSeek 地址、模型和已保存的密钥继续可用，它们只是初始默认值。兼容请求不会向其他服务发送 DeepSeek 专用参数；接口明确拒绝 JSON 格式或输出长度参数时，会去掉相应可选参数重试。原生 Anthropic Messages、Responses 等不同协议需通过兼容网关接入。
 
 ## 录音和输入
 
@@ -43,8 +53,8 @@
 - 设置：`%LOCALAPPDATA%/BetterVoiceInput/settings.json`，不包含密钥。
 - 可选加密历史：同目录 `history.json`。
 - 模型：优先使用设置中的 `model_dir`，其次是可执行文件旁的 `models`；从项目 `dist/BetterVoiceInput` 运行时也会查找项目根目录的 `models`。最后使用上述用户目录下的 `models`。本机模型已安装在项目根目录，不需要再次下载。
-- Key：Windows 凭据管理器，服务名 `better-voice-input`；开发测试还可使用 `DEEPSEEK_API_KEY` 或项目根目录的 `deepseek api key.txt`。
-- 音频在本机识别。转写和相关词库通过 HTTPS 发送至 DeepSeek，需要联网且账户有余额。
+- Key：Windows 凭据管理器，服务名 `better-voice-input`，不同 API 地址使用独立凭据。开发测试可同时设置 `BVI_API_KEY` 和匹配的 `BVI_API_BASE_URL`；旧 `DEEPSEEK_API_KEY` 和根目录 `deepseek api key.txt` 只会用于 DeepSeek 官方接口。
+- 音频在本机识别。转写和相关词库发送至所选 API，服务可用性和计费由所选服务商决定。
 
 ## 常见问题
 

@@ -6,6 +6,7 @@ import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from .api_config import DEFAULT_API_BASE_URL, chat_completion_url, credential_account, is_deepseek_api
 from .shortcuts import DEFAULT_HOTKEY, HOTKEYS
 
 SERVICE = "better-voice-input"
@@ -38,6 +39,7 @@ def default_model_dir() -> Path:
 
 @dataclass
 class Settings:
+    api_base_url: str = DEFAULT_API_BASE_URL
     model: str = "deepseek-flash"
     model_dir: str = ""
     microphone: int | None = None
@@ -88,27 +90,42 @@ class Settings:
         temp.replace(path)
 
 
-def read_key(key_file: Path | None = None) -> str:
+def read_key(key_file: Path | None = None, *, api_base_url: str = DEFAULT_API_BASE_URL) -> str:
     if key_file is not None:
         return key_file.read_text(encoding="utf-8-sig").strip()
-    value = os.environ.get("DEEPSEEK_API_KEY", "").strip()
-    if value:
-        return value
+    try:
+        account = credential_account(api_base_url)
+    except ValueError:
+        return ""
+    # A generic environment key must be paired with its intended endpoint.
+    env_url = os.environ.get("BVI_API_BASE_URL", "")
+    try:
+        if env_url and chat_completion_url(env_url) == chat_completion_url(api_base_url):
+            value = os.environ.get("BVI_API_KEY", "").strip()
+            if value:
+                return value
+    except ValueError:
+        pass
+    legacy = is_deepseek_api(api_base_url)
+    if legacy:
+        value = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+        if value:
+            return value
     try:
         import keyring
 
-        value = keyring.get_password(SERVICE, "deepseek")
+        value = keyring.get_password(SERVICE, account)
         if value:
             return value
     except Exception:
         pass
     local = project_root() / "deepseek api key.txt"
-    if local.is_file():
+    if legacy and local.is_file():
         return local.read_text(encoding="utf-8-sig").strip()
     return ""
 
 
-def save_key(value: str) -> None:
+def save_key(value: str, *, api_base_url: str = DEFAULT_API_BASE_URL) -> None:
     import keyring
 
-    keyring.set_password(SERVICE, "deepseek", value.strip())
+    keyring.set_password(SERVICE, credential_account(api_base_url), value.strip())

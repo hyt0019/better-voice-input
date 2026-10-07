@@ -5,7 +5,7 @@ import json
 import time
 from pathlib import Path
 
-from .cleanup import CleanupError, DeepSeekCleaner
+from .cleanup import ApiCleaner, CleanupError
 from .settings import Settings, read_key
 
 
@@ -23,6 +23,7 @@ def main() -> int:
     for command in (clean, transcribe):
         command.add_argument("--key-file", type=Path)
         command.add_argument("--model", default=None)
+        command.add_argument("--base-url", default=None, help="兼容 Chat Completions 的 API 地址")
         command.add_argument("--output", type=Path, help="保存结果 JSON（可能包含个人内容）")
     args = parser.parse_args()
     settings = Settings.load()
@@ -53,9 +54,13 @@ def main() -> int:
         else:
             text = args.input.read_text(encoding="utf-8-sig")
         if args.command == "clean" or args.clean:
-            result = DeepSeekCleaner(read_key(args.key_file), args.model or settings.model).clean(
-                text, settings.glossary
-            )
+            base_url = args.base_url or settings.api_base_url
+            result = ApiCleaner(
+                read_key(args.key_file, api_base_url=base_url),
+                args.model or settings.model,
+                settings.api_timeout,
+                base_url=base_url,
+            ).clean(text, settings.glossary)
             data.update(
                 text=result.text,
                 warnings=result.warnings,

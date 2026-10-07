@@ -16,10 +16,12 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
+from .api_config import chat_completion_url
 from .settings import Settings, read_key, save_key
 from .shortcuts import RECORDING_CHOICES
 
@@ -132,12 +134,23 @@ class SettingsDialog(QDialog):
         layout.setSpacing(16)
         form = QFormLayout()
         form.setSpacing(12)
+        self.base_url = QLineEdit(settings.api_base_url)
+        self.base_url.setPlaceholderText("例如 https://api.example.com/v1")
+        self.base_url.setToolTip("填写兼容 Chat Completions 的 API 地址，支持 Base URL 或完整请求地址。")
+        form.addRow("API 地址", self.base_url)
         self.key = QLineEdit()
         self.key.setEchoMode(QLineEdit.EchoMode.Password)
-        self.key.setPlaceholderText("已找到密钥；留空保留" if read_key() else "粘贴 DeepSeek API Key")
+        self.update_key_hint()
+        self.base_url.textChanged.connect(self.api_address_changed)
         form.addRow("API Key", self.key)
         self.model = QLineEdit(settings.model)
-        form.addRow("DeepSeek 模型", self.model)
+        self.model.setPlaceholderText("填写服务商提供的模型名称")
+        form.addRow("模型名称", self.model)
+        self.timeout = QSpinBox()
+        self.timeout.setRange(1, 120)
+        self.timeout.setSuffix(" 秒")
+        self.timeout.setValue(int(settings.api_timeout))
+        form.addRow("请求超时", self.timeout)
         self.mic = QComboBox()
         self.mic.addItem("系统默认麦克风", None)
         try:
@@ -184,7 +197,7 @@ class SettingsDialog(QDialog):
         model_label.setObjectName("muted")
         layout.addWidget(model_label)
         privacy = QLabel(
-            "音频在本机识别。整理时，转写文字和相关词库发送至 DeepSeek。\n密钥保存至 Windows 凭据管理器。默认不保存正文历史或录音。"
+            "音频在本机识别。整理时，文字和词库发送至所选 API。\n密钥按 API 地址分别保存在 Windows 凭据管理器。"
         )
         privacy.setWordWrap(True)
         privacy.setObjectName("muted")
@@ -198,20 +211,47 @@ class SettingsDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
+    def update_key_hint(self):
+        found = bool(read_key(api_base_url=self.base_url.text()))
+        self.key.setPlaceholderText("该地址已有密钥；留空保留" if found else "填写此 API 地址对应的密钥")
+
+    def api_address_changed(self):
+        self.key.clear()
+        self.update_key_hint()
+
     def save(self):
         words = list(dict.fromkeys(x.strip() for x in self.glossary.toPlainText().splitlines() if x.strip()))
         if len(words) > 100 or any(len(word) > 80 for word in words):
             QMessageBox.warning(self, "检查词库", "最多添加 100 个词，每个词不超过 80 字。")
             return
         if not self.model.text().strip():
-            QMessageBox.warning(self, "检查模型", "请填写 DeepSeek 模型名称。")
+            QMessageBox.warning(self, "检查模型", "请填写 API 服务商提供的模型名称。")
+            return
+        base_url = self.base_url.text().strip().rstrip("/")
+        try:
+            endpoint = chat_completion_url(base_url)
+        except ValueError as exc:
+            QMessageBox.warning(self, "检查 API 地址", str(exc))
+            return
+        try:
+            previous_endpoint = chat_completion_url(self.settings.api_base_url)
+        except ValueError:
+            previous_endpoint = ""
+        if (
+            endpoint != previous_endpoint
+            and not self.key.text().strip()
+            and not read_key(api_base_url=base_url)
+        ):
+            QMessageBox.warning(self, "检查 API Key", "已更换 API 地址，请填写该服务对应的密钥。")
             return
         try:
             if self.key.text().strip():
-                save_key(self.key.text())
+                save_key(self.key.text(), api_base_url=base_url)
             self.updated = replace(
                 self.settings,
                 model=self.model.text().strip(),
+                api_base_url=base_url,
+                api_timeout=float(self.timeout.value()),
                 microphone=self.mic.currentData(),
                 hotkey=self.hotkey.currentText(),
                 hold_to_talk=self.hold.isChecked(),

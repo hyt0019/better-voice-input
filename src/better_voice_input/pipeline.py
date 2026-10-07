@@ -7,7 +7,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, Signal
 
 from .audio import decode_audio
-from .cleanup import Cancelled, CleanupError, DeepSeekCleaner
+from .cleanup import ApiCleaner, Cancelled, CleanupError
 from .core import CleanupResult
 from .models import download_models
 from .settings import Settings, read_key
@@ -71,9 +71,12 @@ class Pipeline:
             used_original = False
             cleanup_started = time.monotonic()
             try:
-                result = DeepSeekCleaner(read_key(), settings.model, settings.api_timeout).clean(
-                    text, settings.glossary, cancel
-                )
+                result = ApiCleaner(
+                    read_key(api_base_url=settings.api_base_url),
+                    settings.model,
+                    settings.api_timeout,
+                    base_url=settings.api_base_url,
+                ).clean(text, settings.glossary, cancel)
             except Cancelled:
                 raise
             except CleanupError as exc:

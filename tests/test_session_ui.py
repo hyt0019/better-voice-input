@@ -24,7 +24,8 @@ def qt_app():
 
 
 @pytest.fixture
-def window(qt_app):
+def window(qt_app, monkeypatch):
+    monkeypatch.setattr("better_voice_input.ui.read_key", lambda *args, **kwargs: "")
     widget = MainWindow(Settings(), native=False)
     yield widget
     widget.shutdown()
@@ -249,7 +250,7 @@ def test_failed_startup_change_keeps_existing_window_settings(window, monkeypatc
 
 def test_cancelled_pipeline_never_calls_api(window, monkeypatch):
     calls = []
-    monkeypatch.setattr("better_voice_input.pipeline.DeepSeekCleaner", lambda *args: calls.append(args))
+    monkeypatch.setattr("better_voice_input.pipeline.ApiCleaner", lambda *args: calls.append(args))
     event = threading.Event()
     event.set()
     window.pipeline._run(1, event, Settings(), "一段文字", "text")
@@ -278,7 +279,7 @@ def test_audio_api_failure_inserts_original_unless_cancelled(window, monkeypatch
 
     monkeypatch.setattr("better_voice_input.pipeline.read_key", lambda *args, **kwargs: "test")
     monkeypatch.setattr(
-        "better_voice_input.pipeline.DeepSeekCleaner", lambda *args, **kwargs: SimpleNamespace(clean=clean)
+        "better_voice_input.pipeline.ApiCleaner", lambda *args, **kwargs: SimpleNamespace(clean=clean)
     )
     monkeypatch.setattr(window, "attempt_insert", lambda *args: calls.append(args))
     monkeypatch.setattr(window, "reveal", lambda: pytest.fail("No review window during dictation"))
@@ -287,6 +288,24 @@ def test_audio_api_failure_inserts_original_unless_cancelled(window, monkeypatch
     if not cancelled:
         assert window.result.toPlainText() == source
         assert "识别原文" in window.notice.text()
+
+
+def test_settings_accept_custom_api_and_clear_old_typed_key_on_address_change(window, monkeypatch):
+    saved = []
+    monkeypatch.setattr("better_voice_input.ui.save_key", lambda key, **kwargs: saved.append((key, kwargs)))
+    dialog = SettingsDialog(Settings(), window)
+    dialog.key.setText("old-typed-key")
+    dialog.base_url.setText("https://provider.example/v1")
+    assert dialog.key.text() == ""
+    dialog.key.setText("new-provider-key")
+    dialog.model.setText("custom-model")
+    dialog.timeout.setValue(60)
+    dialog.save()
+    assert dialog.updated.api_base_url == "https://provider.example/v1"
+    assert dialog.updated.model == "custom-model"
+    assert dialog.updated.api_timeout == 60.0
+    assert saved == [("new-provider-key", {"api_base_url": "https://provider.example/v1"})]
+    dialog.close()
 
 
 @pytest.mark.parametrize("change", ["caret", "window", "focus", "process", "unavailable"])

@@ -204,7 +204,7 @@ class MainWindow(QMainWindow):
         self.download_button.clicked.connect(self.download)
         bottom.addWidget(self.download_button)
         layout.addLayout(bottom)
-        privacy = QLabel("音频留在本机，整理时发送文字至 DeepSeek。")
+        privacy = QLabel("音频留在本机，整理时发送文字至所选 API。")
         privacy.setObjectName("muted")
         layout.addWidget(privacy)
 
@@ -655,7 +655,7 @@ def main() -> int:
     window = MainWindow(native=not args.smoke)
     background_ready = (
         models_ready(window.settings.models)
-        and bool(read_key())
+        and bool(read_key(api_base_url=window.settings.api_base_url))
         and QSystemTrayIcon.isSystemTrayAvailable()
         and (args.smoke or 1 in window.hotkeys.registered)
     )

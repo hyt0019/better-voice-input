@@ -4,13 +4,18 @@ import json
 from pathlib import Path
 import re
 
-from better_voice_input.cleanup import DeepSeekCleaner
+from better_voice_input.cleanup import ApiCleaner
 from better_voice_input.settings import Settings, read_key
 
 root = Path(__file__).resolve().parents[1]
 cases = json.loads((root / "tests/fixtures/cleanup-cases.json").read_text(encoding="utf-8"))
 settings = Settings.load()
-cleaner = DeepSeekCleaner(read_key(), settings.model)
+cleaner = ApiCleaner(
+    read_key(api_base_url=settings.api_base_url),
+    settings.model,
+    settings.api_timeout,
+    base_url=settings.api_base_url,
+)
 report = []
 for case in cases:
     result = cleaner.clean(case["input"], settings.glossary)
