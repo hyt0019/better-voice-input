@@ -16,6 +16,15 @@ user32.GetWindowThreadProcessId.restype = wintypes.DWORD
 user32.IsWindow.argtypes = [wintypes.HWND]
 user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
 user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+user32.MapVirtualKeyW.argtypes = [wintypes.UINT, wintypes.UINT]
+user32.MapVirtualKeyW.restype = wintypes.UINT
+user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+
+
+def window_class(window: int) -> str:
+    buffer = ctypes.create_unicode_buffer(256)
+    user32.GetClassNameW(window, buffer, 256)
+    return buffer.value.lower()
 
 
 class GUIThreadInfo(ctypes.Structure):
@@ -56,6 +65,13 @@ def current_target() -> InputTarget | None:
         return None
     pid = wintypes.DWORD()
     thread = user32.GetWindowThreadProcessId(window, ctypes.byref(pid))
+    if not thread or not pid.value:
+        return None
+    # Conhost reports its console client's thread, which may have no GUI queue.
+    # A classic console has one input stream; its top-level window is the target.
+    # Keep normal focused-control checks for GUI terminals with tabs/panes.
+    if window_class(window) == "consolewindowclass":
+        return InputTarget(int(window), int(window), (0, 0, 0, 0), pid.value)
     info = GUIThreadInfo()
     info.cbSize = ctypes.sizeof(info)
     if not user32.GetGUIThreadInfo(thread, ctypes.byref(info)):
@@ -68,10 +84,7 @@ def current_target() -> InputTarget | None:
 
 def is_password(target: InputTarget) -> bool:
     # Native Edit controls expose ES_PASSWORD. Custom web fields may not expose it.
-    buffer = ctypes.create_unicode_buffer(256)
-    user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
-    user32.GetClassNameW(target.focus, buffer, 256)
-    return buffer.value.lower() == "edit" and bool(user32.GetWindowLongW(target.focus, -16) & 0x20)
+    return window_class(target.focus) == "edit" and bool(user32.GetWindowLongW(target.focus, -16) & 0x20)
 
 
 def shortcut_held(name: str) -> bool:
@@ -164,9 +177,7 @@ def paste_text(text: str, target: InputTarget, clipboard, restore_callback=None)
         raise PasteError(f"输入位置已经变化，结果已保留。请回到目标输入框后按 {INSERT_HOTKEY}。")
     if is_password(target):
         raise PasteError("密码输入框不支持自动输入，请切换到普通文本框。")
-    class_name = ctypes.create_unicode_buffer(256)
-    user32.GetClassNameW(target.window, class_name, 256)
-    terminal = class_name.value.lower() in (
+    terminal = window_class(target.window) in (
         "consolewindowclass", "cascadia_hosting_window_class", "mintty"
     )
     if modifiers_held():
@@ -195,7 +206,12 @@ def paste_text(text: str, target: InputTarget, clipboard, restore_callback=None)
     keys = ((modifier, 0), (paste_key, 0), (paste_key, 2), (modifier, 2))
     for event, (key, flags) in zip(events, keys, strict=True):
         event.type = 1
-        event.ki = KEYBDINPUT(key, 0, flags, 0, 0)
+        scan = user32.MapVirtualKeyW(key, 4)  # MAPVK_VK_TO_VSC_EX preserves the E0 prefix.
+        # Some layouts map VK_INSERT to keypad scan 0x52 without the E0 prefix.
+        # Always request the dedicated Insert key so Num Lock cannot change the chord.
+        if key == 0x2D or scan & 0xFF00 == 0xE000:
+            flags |= 0x0001  # KEYEVENTF_EXTENDEDKEY, required for the dedicated Insert key.
+        event.ki = KEYBDINPUT(key, scan & 0xFF, flags, 0, 0)
     sent = user32.SendInput(4, ctypes.byref(events), ctypes.sizeof(INPUT))
     QTimer.singleShot(1000, restore)
     if sent != 4:

@@ -349,7 +349,8 @@ def test_copy_edited_text_is_always_single_line(window, result):
 @pytest.mark.parametrize(
     "class_name", ["ConsoleWindowClass", "CASCADIA_HOSTING_WINDOW_CLASS", "mintty", "Chrome_WidgetWin_1"]
 )
-def test_terminal_and_regular_paste_are_single_line_without_enter(window, monkeypatch, class_name):
+@pytest.mark.parametrize("partial_send", [False, True])
+def test_terminal_and_regular_paste_are_single_line_without_enter(window, monkeypatch, class_name, partial_send):
     import ctypes
     from better_voice_input import windows
 
@@ -365,8 +366,8 @@ def test_terminal_and_regular_paste_are_single_line_without_enter(window, monkey
 
     def send(count, pointer, _size):
         events = ctypes.cast(pointer, ctypes.POINTER(windows.INPUT))
-        sent.extend((events[i].ki.wVk, events[i].ki.dwFlags) for i in range(count))
-        return count
+        sent.extend((events[i].ki.wVk, events[i].ki.wScan, events[i].ki.dwFlags) for i in range(count))
+        return min(2, count) if partial_send else count
 
     monkeypatch.setattr(windows, "current_target", lambda: target)
     monkeypatch.setattr(windows, "is_password", lambda _: False)
@@ -376,10 +377,23 @@ def test_terminal_and_regular_paste_are_single_line_without_enter(window, monkey
     monkeypatch.setattr(windows.user32, "GetClipboardSequenceNumber", lambda: 123)
     monkeypatch.setattr(windows.user32, "SendInput", send)
     monkeypatch.setattr(windows.QTimer, "singleShot", lambda _ms, callback: timers.append(callback))
-    windows.paste_text("第一句。\r\n第二句。\u2028结束。\t\x00\x1b\n", target, clipboard)
+    if partial_send:
+        with pytest.raises(PasteError, match="Windows 未完成输入"):
+            windows.paste_text("第一句。\r\n第二句。\u2028结束。\t\x00\x1b\n", target, clipboard)
+    else:
+        windows.paste_text("第一句。\r\n第二句。\u2028结束。\t\x00\x1b\n", target, clipboard)
     assert clipboard.text() == "第一句。 第二句。 结束。"
     modifier, key = (0x11, 0x56) if class_name == "Chrome_WidgetWin_1" else (0x10, 0x2D)
-    assert sent == [(modifier, 0), (key, 0), (key, 2), (modifier, 2)]
-    assert all(key != 0x0D for key, _flags in sent)
+    modifier_scan = windows.user32.MapVirtualKeyW(modifier, 4) & 0xFF
+    key_scan = windows.user32.MapVirtualKeyW(key, 4) & 0xFF
+    extended = 0 if class_name == "Chrome_WidgetWin_1" else 1
+    assert sent[:4] == [
+        (modifier, modifier_scan, 0), (key, key_scan, extended),
+        (key, key_scan, extended | 2), (modifier, modifier_scan, 2),
+    ]
+    assert all(key != 0x0D for key, _scan, _flags in sent)
+    if class_name != "Chrome_WidgetWin_1":
+        assert sent[1] == (0x2D, 0x52, 1)  # Dedicated Insert, never keypad 0/Insert.
+    assert sent[4:] == (sent[2:4] if partial_send else [])
     timers[0]()
     assert clipboard.text() == "previous clipboard"

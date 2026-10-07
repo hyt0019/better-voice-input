@@ -1,5 +1,13 @@
 # 验证记录
 
+## 2026-10-08：修复 CMD / PowerShell 实际粘贴失败
+
+- 根据用户“已输入但没有文字，且未以管理员运行”的反馈复查，发现 Shift+Insert 的 Insert 事件缺少扫描码和 `KEYEVENTF_EXTENDEDKEY`。修复后明确发送独立 Insert 键，避免被当成数字键盘的 0/Insert。依据：[微软扩展键说明](https://learn.microsoft.com/en-us/windows/win32/inputdev/about-keyboard-input#extended-key-flag)。
+- 真实传统控制台同时暴露 `GetGUIThreadInfo` 无法取得控制台客户端 GUI 队列的问题。现在仅对 `ConsoleWindowClass` 使用前台控制台窗口和进程作为输入目标；其他窗口仍核对具体输入控件，Windows Terminal 的标签和面板检查没有放宽。
+- 新增 `scripts/verify_terminal_input.py`，创建独立的普通权限控制台并启动 CMD 或 Windows PowerShell，校验窗口归属、取得焦点后调用实际粘贴代码，从测试控制台的活动缓冲区核对文字。测试不发送 Enter，不操作用户已有终端；记录只包含测试状态及进程元数据。
+- 本机 CMD：旧按键 `legacy_present=false`，修复后 `fixed_present=true`。Windows PowerShell：同样为旧按键失败、修复后成功。这是实际终端粘贴验证，取代上一轮仅模拟 Win32 调用的验证范围。
+- 129 项离线测试通过且正常退出，覆盖传统控制台缺少 GUI 队列、普通窗口的严格焦点检查、Insert 扩展标记与扫描码、部分发送失败后的按键释放、单行文本和剪贴板恢复。
+
 ## 2026-10-07：单行终端输入与数据清理
 
 - 整理结果统一为单行；复制原文、复制结果和最终粘贴再次执行相同处理，覆盖手动编辑、历史载入与 API 失败时的原文回退。CR/LF、Unicode 行分隔符、制表符和终端控制字符转换为空格，保留正常文字和标点。
