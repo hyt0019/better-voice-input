@@ -20,7 +20,9 @@ from better_voice_input.windows import InputTarget, PasteError
 def qt_app():
     app = QApplication.instance() or QApplication([])
     app.setStyleSheet(STYLE)
-    return app
+    yield app
+    # Dispose restored QMimeData while the offscreen Qt clipboard is still alive.
+    app.clipboard().clear()
 
 
 @pytest.fixture
