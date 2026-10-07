@@ -80,12 +80,12 @@ class Recorder:
             self.stream.start()
             self.started = time.monotonic()
         except (sd.PortAudioError, ValueError):
-            if self.stream:
-                self.stream.close()
-            self.stream = None
+            self.cancel()
             raise AudioError("无法打开麦克风，请检查 Windows 麦克风权限及所选设备。") from None
 
     def _callback(self, data, frames, time_info, status):
+        if self.stream is None:
+            return
         if status:
             self.overflow = True
         remaining = max(0, self.rate * MAX_SECONDS - self.count)
@@ -98,18 +98,29 @@ class Recorder:
         if self.count >= self.rate * MAX_SECONDS:
             self.limit_reached.set()
 
+    def _close_stream(self, *, abort: bool = False):
+        stream, self.stream = self.stream, None
+        if stream is not None:
+            try:
+                stream.abort() if abort else stream.stop()
+            finally:
+                stream.close()
+
     def stop(self) -> np.ndarray:
-        if self.stream:
-            self.stream.stop()
-            self.stream.close()
-            self.stream = None
-        samples = np.concatenate(self.chunks) if self.chunks else np.empty(0, dtype=np.float32)
-        self.chunks = []
-        return resample_audio(samples, self.rate) if samples.size else samples
+        try:
+            self._close_stream()
+            samples = np.concatenate(self.chunks) if self.chunks else np.empty(0, dtype=np.float32)
+            return resample_audio(samples, self.rate) if samples.size else samples
+        finally:
+            self.chunks.clear()
+            self.count = 0
 
     def cancel(self):
-        if self.stream:
-            self.stream.abort()
-            self.stream.close()
-            self.stream = None
-        self.chunks = []
+        try:
+            self._close_stream(abort=True)
+        except Exception:
+            # A disconnected device must not prevent cancellation or buffer cleanup.
+            pass
+        finally:
+            self.chunks.clear()
+            self.count = 0

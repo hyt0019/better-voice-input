@@ -45,3 +45,33 @@ def test_nonobject_settings_do_not_crash(tmp_path):
     path = tmp_path / "settings.json"
     path.write_text("[]")
     assert Settings.load(path) == Settings()
+
+
+def test_history_keeps_only_latest_five_on_disk_and_in_display(tmp_path):
+    store = HistoryStore(tmp_path / "history.json")
+    for index in range(8):
+        store.append(f"原文{index}", f"结果{index}")
+    assert [row["text"] for row in store.read()] == [f"结果{i}" for i in range(7, 2, -1)]
+    assert len(json.loads(store.path.read_text(encoding="utf-8"))) == 5
+
+
+def test_prune_migrates_old_history_without_decrypting_or_adding_entries(tmp_path):
+    store = HistoryStore(tmp_path / "history.json")
+    rows = [{"created": time.time() - 200 + i, "data": f"encrypted-{i}"} for i in range(100)]
+    store.path.write_text(json.dumps(rows), encoding="utf-8")
+    store.path.with_suffix(".tmp").write_text("old temporary history", encoding="utf-8")
+    store.prune()
+    assert json.loads(store.path.read_text(encoding="utf-8")) == rows[-5:]
+    assert not store.path.with_suffix(".tmp").exists()
+
+
+def test_prune_and_clear_remove_leftover_temporary_history(tmp_path):
+    store = HistoryStore(tmp_path / "history.json")
+    temp = store.path.with_suffix(".tmp")
+    temp.write_text("leftover", encoding="utf-8")
+    store.prune()
+    assert not store.path.exists()
+    assert not temp.exists()
+    temp.write_text("leftover", encoding="utf-8")
+    store.clear()
+    assert not temp.exists()

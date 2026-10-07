@@ -1,11 +1,12 @@
 import hashlib
 from pathlib import Path
 import wave
+import weakref
 
 import numpy as np
 import pytest
 
-from better_voice_input.audio import AudioError, decode_audio, resample_audio
+from better_voice_input.audio import AudioError, Recorder, decode_audio, resample_audio
 from better_voice_input.models import ModelFile, verify_file
 
 
@@ -60,3 +61,43 @@ def test_token_git_blob_hash(tmp_path):
         "tokens.txt", "https://example.invalid", 5, hashlib.sha1(b"blob 5\0a b c").hexdigest(), True
     )
     assert verify_file(path, spec)
+
+
+@pytest.mark.parametrize("operation", ["stop", "cancel"])
+@pytest.mark.parametrize("failure", [None, "stop", "close"])
+def test_recorder_releases_buffers_even_when_device_disconnects(operation, failure):
+    calls = []
+
+    class Stream:
+        def stop(self):
+            calls.append("stop")
+            if failure == "stop":
+                raise RuntimeError("disconnected")
+
+        abort = stop
+
+        def close(self):
+            calls.append("close")
+            if failure == "close":
+                raise RuntimeError("disconnected")
+
+    recorder = Recorder()
+    recorder.stream = Stream()
+    recorder.chunks = [np.ones(48000, dtype=np.float32)]
+    recorder.count = 48000
+    recording = weakref.ref(recorder.chunks[0])
+    if operation == "stop" and failure:
+        with pytest.raises(RuntimeError, match="disconnected"):
+            recorder.stop()
+    else:
+        result = getattr(recorder, operation)()
+        if operation == "stop":
+            assert abs(result.size - 16000) < 20
+    assert calls == ["stop", "close"]
+    assert recorder.stream is None
+    assert recorder.chunks == []
+    assert recorder.count == 0
+    assert recording() is None
+    # Late device callbacks cannot start retaining audio again.
+    recorder._callback(np.ones((100, 1), dtype=np.float32), 100, None, None)
+    assert recorder.chunks == []

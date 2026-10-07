@@ -30,8 +30,16 @@ class Pipeline:
 
     def start(self, job: int, cancel: threading.Event, settings: Settings, source, kind: str):
         snapshot = Settings(**vars(settings))
-        thread = threading.Thread(target=self._run, args=(job, cancel, snapshot, source, kind), daemon=True)
+        # Thread.args would retain the recording until the later API call finishes.
+        # Transfer ownership out of this container as soon as the worker starts.
+        pending = [source]
+
+        def run():
+            self._run(job, cancel, snapshot, pending.pop(), kind)
+
+        thread = threading.Thread(target=run, daemon=True)
         thread.start()
+        return thread
 
     def _run(self, job: int, cancel: threading.Event, settings: Settings, source, kind: str):
         try:
@@ -49,18 +57,22 @@ class Pipeline:
                 duration = 0
             else:
                 samples = decode_audio(Path(source)) if kind == "file" else source
+                source = None
                 duration = samples.size / 16000
-                self.events.stage.emit(job, "正在本地识别…")
-                with self.lock:
-                    if cancel.is_set():
-                        raise Cancelled("已取消。")
-                    if self.recognizer is None or self.recognizer.directory != settings.models:
-                        from .asr import LocalRecognizer
+                try:
+                    self.events.stage.emit(job, "正在本地识别…")
+                    with self.lock:
+                        if cancel.is_set():
+                            raise Cancelled("已取消。")
+                        if self.recognizer is None or self.recognizer.directory != settings.models:
+                            from .asr import LocalRecognizer
 
-                        self.recognizer = LocalRecognizer(settings.models)
-                    text = self.recognizer.transcribe(
-                        samples, cancel, lambda value: self.events.transcript.emit(job, value)
-                    )
+                            self.recognizer = LocalRecognizer(settings.models)
+                        text = self.recognizer.transcribe(
+                            samples, cancel, lambda value: self.events.transcript.emit(job, value)
+                        )
+                finally:
+                    samples = None  # Audio is no longer needed while waiting for the text API.
                 self.events.transcript.emit(job, text)
                 if not text.strip():
                     raise RuntimeError("没有检测到清晰语音，请检查麦克风或靠近一些重试。")

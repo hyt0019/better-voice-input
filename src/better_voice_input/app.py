@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 
 from .audio import AudioError, Recorder
 from .core import single_line_text
+from .history import HistoryStore
 from .models import models_ready
 from .pipeline import Events, Pipeline
 from .session import SessionGate
@@ -193,7 +194,7 @@ class MainWindow(QMainWindow):
         actions.addWidget(self.copy_button)
         actions.addWidget(self.insert_button)
         layout.addLayout(actions)
-        self.stats = QLabel("默认仅保留当前会话；可在设置中开启本机加密历史。")
+        self.stats = QLabel("录音不落盘；可在设置中开启本机加密历史，最多保留 5 条。")
         self.stats.setObjectName("muted")
         layout.addWidget(self.stats)
         bottom = QHBoxLayout()
@@ -374,8 +375,6 @@ class MainWindow(QMainWindow):
             f"本地识别 {data['asr_seconds']:.1f} 秒    文字整理 {result.elapsed:.1f} 秒    本次 {result.usage.get('total_tokens', 0)} tokens"
         )
         if self.settings.save_history:
-            from .history import HistoryStore
-
             try:
                 HistoryStore().append(result.original, result.text)
             except Exception:
@@ -511,7 +510,7 @@ class MainWindow(QMainWindow):
         self.result.clear()
         self.set_notice()
         self.status.setText("准备好，慢慢说")
-        self.stats.setText("默认仅保留当前会话；可在设置中开启本机加密历史。")
+        self.stats.setText("录音不落盘；可在设置中开启本机加密历史，最多保留 5 条。")
 
     def copy_text(self, result: bool):
         text = single_line_text(self.result.toPlainText() if result else self.original.toPlainText())
@@ -553,8 +552,6 @@ class MainWindow(QMainWindow):
         self.activateWindow()
 
     def open_history(self):
-        from .history import HistoryStore
-
         store = HistoryStore()
         try:
             rows = store.read()
@@ -565,7 +562,7 @@ class MainWindow(QMainWindow):
         dialog.setWindowTitle("本机历史 · 好好说")
         dialog.resize(650, 440)
         layout = QVBoxLayout(dialog)
-        layout.addWidget(QLabel("默认不保存。可在设置中开启，加密保留最近 7 天、最多 100 条。"))
+        layout.addWidget(QLabel("默认不保存。开启后仅保留最近 5 条文字，超过 7 天自动清理。"))
         listing = QListWidget()
         for row in rows:
             date = time.strftime("%m-%d %H:%M", time.localtime(row["created"]))
@@ -654,6 +651,10 @@ def main() -> int:
         QMessageBox.information(None, "好好说", "程序已在运行，请点击系统托盘中的麦克风图标。")
         return 0
     window = MainWindow(native=not args.smoke)
+    try:
+        HistoryStore().prune()
+    except OSError:
+        window.set_notice("旧历史清理失败，请在“历史”中清空或检查本地目录权限。")
     background_ready = (
         models_ready(window.settings.models)
         and bool(read_key(api_base_url=window.settings.api_base_url))

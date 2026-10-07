@@ -50,6 +50,7 @@ def main() -> int:
             data["duration"] = round(audio.size / 16000, 2)
             recognizer = LocalRecognizer(args.directory or settings.models)
             text = recognizer.transcribe(audio)
+            del audio
             data.update(original=text, asr_seconds=round(time.monotonic() - started, 2))
         else:
             text = args.input.read_text(encoding="utf-8-sig")

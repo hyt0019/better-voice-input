@@ -175,8 +175,8 @@ class SettingsDialog(QDialog):
         self.hold = QCheckBox("按住快捷键说话，松开结束")
         self.hold.setChecked(settings.hold_to_talk)
         form.addRow("录音方式", self.hold)
-        form.addRow("输入方式", QLabel("快捷键录音后直接输入，疑点不暂停"))
-        self.history = QCheckBox("在本机加密保留最近 7 天文字，最多 100 条")
+        form.addRow("输入方式", QLabel("直接输入单行文字，支持终端，不自动回车"))
+        self.history = QCheckBox("仅保留最近 5 条文字（本机加密，最长 7 天）")
         self.history.setChecked(settings.save_history)
         form.addRow("历史记录", self.history)
         self.startup = QCheckBox("开机自启动，登录 Windows 后在托盘运行")
@@ -197,7 +197,8 @@ class SettingsDialog(QDialog):
         model_label.setObjectName("muted")
         layout.addWidget(model_label)
         privacy = QLabel(
-            "音频在本机识别。整理时，文字和词库发送至所选 API。\n密钥按 API 地址分别保存在 Windows 凭据管理器。"
+            "录音仅在内存中，本地识别后释放，不保存录音文件。\n"
+            "文字和词库发送至所选 API；密钥按 API 地址分别保存。"
         )
         privacy.setWordWrap(True)
         privacy.setObjectName("muted")
