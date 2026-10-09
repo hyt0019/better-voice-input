@@ -30,6 +30,25 @@ API 地址支持 Base URL（如 `https://api.example.com/v1`）或完整 `/chat/
 
 普通 pytest 不访问网络，也不读取测试 Key。
 
+## 发布安装包
+
+一次性准备：`winget install JRSoftware.InnoSetup`（按用户安装即可）；如需命令行发布，再安装 GitHub CLI 并运行 `gh auth login`。
+
+1. 修改 `pyproject.toml` 和 `src/better_voice_input/__init__.py` 中的版本号（两处必须一致），在 `docs/releases/` 写好该版本的发布说明并提交。
+2. 退出正在运行的好好说（打包会覆盖 `dist`），运行 `scripts\build_installer.ps1`。它会跑完测试、构建程序、检查程序目录中没有模型和密钥，然后生成 `release\BetterVoiceInput-Setup-版本号.exe` 及对应的 `.sha256` 文件。
+3. 在干净环境（Windows 沙盒或新的 Windows 用户）中安装、完成首次使用流程、再卸载一遍。
+4. 打标签并发布：
+
+```powershell
+git tag v0.1.0
+git push origin v0.1.0
+gh release create v0.1.0 release\BetterVoiceInput-Setup-0.1.0.exe release\BetterVoiceInput-Setup-0.1.0.exe.sha256 --title "好好说 0.1.0" --notes-file docs\releases\v0.1.0.md
+```
+
+也可以在 GitHub 网页的 Releases → Draft a new release 中选择标签、填写说明并上传这两个文件。
+
+安装包按用户安装到 `%LOCALAPPDATA%\Programs\BetterVoiceInput`，不需要管理员权限；安装和卸载时只关闭该目录中运行的程序，卸载只移除指向该目录的开机自启项，用户数据保留在 `%LOCALAPPDATA%\BetterVoiceInput`。安装向导使用 Inno Setup 官方仓库中社区维护的简体中文翻译（`installer/ChineseSimplified.isl`，对应 Inno Setup 6.7.3）。
+
 ## 设计原则
 
 - 音频在本机识别；转写文本和相关词库发送至设置中选定的 API。

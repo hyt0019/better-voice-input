@@ -84,3 +84,5 @@
 ---
 
 开发者：源码构建、测试和设计说明见 [开发说明](docs/DEVELOPMENT.md)。
+
+本项目以 [MIT 许可证](LICENSE) 开源。语音模型由各自作者以其许可证发布，见 [第三方组件](THIRD_PARTY_NOTICES.md)。

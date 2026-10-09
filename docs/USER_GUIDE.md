@@ -1,23 +1,23 @@
 # 好好说 · 使用说明
 
-## 启动
+## 安装和启动
 
-本机已安装语音模型并配置好密钥。双击 `启动好好说.cmd` 后程序在系统托盘运行，点击麦克风图标可以打开主窗口和设置。
+从 [Releases 页面](https://github.com/hyt0019/better-voice-input/releases) 下载最新的 `BetterVoiceInput-Setup-版本号.exe` 并运行。安装程序装在当前用户目录（`%LOCALAPPDATA%\Programs\BetterVoiceInput`），不需要管理员权限，会在开始菜单创建“好好说”，桌面快捷方式可选。安装新版本时直接运行新的安装包即可覆盖升级，设置、密钥和已下载的模型都会保留。
+
+如果 Windows 提示“Windows 已保护你的电脑”，这是因为程序尚未购买代码签名证书。点击“更多信息”→“仍要运行”即可；不要通过关闭系统防护解决。
 
 **日常使用：点击目标输入框 → 按住 `Alt+X` 说话 → 说完松开 → 等待识别和整理，文字自动输入。** 不需要打开主窗口，也不需要再次确认。录音和处理时仅显示一个不抢焦点的小状态条。
 
-便携程序位于 `dist/BetterVoiceInput/BetterVoiceInput.exe`，整个 BetterVoiceInput 文件夹需保持完整。直接运行 exe 会显示主窗口；加 `--background` 可在配置就绪时仅在托盘运行。
-
-首次在其他电脑运行：
+第一次使用：
 
 1. 打开“设置”，填写 API 地址、该服务的 API Key 和模型名称，保存后生效。密钥进入 Windows 凭据管理器。
 2. 点击“下载语音模型”，约 240 MB；下载文件会校验完整性。
 3. 选择麦克风。Windows 设置 → 隐私和安全性 → 麦克风，需要允许桌面应用访问。
 4. 点击普通文本输入框，按住 `Alt+X` 说话，说完松开。等待整理完成后自动输入。
 
-默认仅保存当前会话。关闭主窗口会缩小到托盘，右键托盘图标选择“退出”才会结束程序。
+关闭主窗口会缩小到托盘，右键托盘图标选择“退出”才会结束程序。
 
-设置 → 启动方式中可勾选“开机自启动，登录 Windows 后在托盘运行”，点击“保存设置”后生效。默认关闭；取消勾选并保存即可关闭。该选项仅影响当前 Windows 用户。移动程序文件夹后，打开新的程序并重新保存设置，以更新启动位置。
+设置 → 启动方式中可勾选“开机自启动，登录 Windows 后在托盘运行”，点击“保存设置”后生效。默认关闭；取消勾选并保存即可关闭。该选项仅影响当前 Windows 用户。
 
 ## API 配置
 
@@ -70,7 +70,7 @@
 
 - 设置：`%LOCALAPPDATA%/BetterVoiceInput/settings.json`，不包含密钥。
 - 可选加密历史：同目录 `history.json`。
-- 模型：默认下载位置优先使用设置中的 `model_dir`，其次是可执行文件旁的 `models`；从项目 `dist/BetterVoiceInput` 运行时也会查找项目根目录的 `models`，最后使用上述用户目录下的 `models`。SenseVoice 位于该文件夹根目录，其他模型各占一个子文件夹（`x-asr-zh-en`、`canary-180m-flash`）。在“语音模型”中更改下载位置后，设置会记录 `download_dir`，已下载模型的位置记录在 `model_paths`。本机 SenseVoice 已安装在项目根目录，不需要再次下载。
+- 模型：默认下载到 `%LOCALAPPDATA%/BetterVoiceInput/models`，可在“语音模型”中更改。SenseVoice 位于该文件夹根目录，其他模型各占一个子文件夹（`x-asr-zh-en`、`canary-180m-flash`）。更改下载位置后，已下载模型的位置会记录在设置中，不需要重新下载。从源码或便携文件夹运行时，程序旁或项目根目录已有的 `models` 文件夹优先。
 - Key：Windows 凭据管理器，服务名 `better-voice-input`，不同 API 地址使用独立凭据。开发测试可同时设置 `BVI_API_KEY` 和匹配的 `BVI_API_BASE_URL`；旧 `DEEPSEEK_API_KEY` 和根目录 `deepseek api key.txt` 只会用于 DeepSeek 官方接口。
 - 音频在本机识别。转写和相关词库发送至所选 API，服务可用性和计费由所选服务商决定。
 
@@ -90,22 +90,14 @@
 
 **用 Canary 说中文结果乱码**：Canary 只识别英文等欧洲语言，说中文或中英混说时请切回 SenseVoice 或 X-ASR。
 
-**出现 SmartScreen 提示**：本地打包程序尚未购买代码签名证书，可从源码复现构建；不要通过关闭系统防护解决。
+**出现 SmartScreen 提示**：程序尚未购买代码签名证书，点击“更多信息”→“仍要运行”；也可以从源码自行构建。不要通过关闭系统防护解决。
+
+**卸载**：在 Windows“设置 → 应用”中卸载“好好说”。卸载会关闭正在运行的程序，并移除它的开机自启项。设置、加密历史和模型留在 `%LOCALAPPDATA%/BetterVoiceInput`，重装后可继续使用；不再需要时可手动删除该文件夹，密钥可在 Windows 凭据管理器中删除 `better-voice-input` 条目。
 
 ## 验证范围
 
 详见 `docs/VALIDATION.md`。已验证用户示例音频、本地识别、真实 API、界面与任务状态。自动化环境无法取得前台窗口焦点，真实麦克风录音以及微信/Word/浏览器等跨窗口兼容性仍需交互桌面试用。
 
-## 开发命令
+## 开发
 
-```powershell
-.\.venv\Scripts\python.exe -m better_voice_input.app
-.\.venv\Scripts\python.exe -m better_voice_input.cli download-models --directory models
-.\.venv\Scripts\python.exe -m better_voice_input.cli download-models --asr-model canary
-.\.venv\Scripts\python.exe -m better_voice_input.cli transcribe '录音.m4a' --clean --output private/result.json
-.\.venv\Scripts\python.exe -m better_voice_input.cli transcribe '录音.m4a' --asr-model xasr
-.\.venv\Scripts\python.exe scripts/evaluate_text.py
-.\scripts\build.ps1
-```
-
-文本评测会调用真实 API 并计费，普通 pytest 不会访问网络或读取测试 Key。
+源码运行、命令行工具、构建和发布见 [开发说明](DEVELOPMENT.md)。

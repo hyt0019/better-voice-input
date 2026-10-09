@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent $PSScriptRoot
 Push-Location -LiteralPath $taskRoot
 try {
@@ -10,6 +10,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
     Copy-Item -LiteralPath 'docs\USER_GUIDE.md' -Destination 'dist\BetterVoiceInput\使用说明.md'
     Copy-Item -LiteralPath 'THIRD_PARTY_NOTICES.md' -Destination 'dist\BetterVoiceInput\THIRD_PARTY_NOTICES.md'
+    Copy-Item -LiteralPath 'LICENSE' -Destination 'dist\BetterVoiceInput\LICENSE.txt'
     & .\.venv\Scripts\python.exe -X utf8 scripts/collect_licenses.py
     Write-Output 'Built dist\BetterVoiceInput\BetterVoiceInput.exe'
 } finally {
