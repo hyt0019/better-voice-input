@@ -85,7 +85,7 @@ def test_hold_release_cleanup_and_automatic_input_stay_in_background(window, mon
     pastes = []
     held = [True]
     samples = object()
-    monkeypatch.setattr("better_voice_input.app.models_ready", lambda _: True)
+    monkeypatch.setattr("better_voice_input.app.models_ready", lambda *args, **kwargs: True)
     monkeypatch.setattr("better_voice_input.app.current_target", lambda: target)
     monkeypatch.setattr("better_voice_input.app.shortcut_held", lambda _: held[0])
     monkeypatch.setattr("better_voice_input.app.modifiers_held", lambda: False)
@@ -152,7 +152,7 @@ def test_global_errors_keep_main_window_hidden(window, monkeypatch, failure):
 
     monkeypatch.setattr(window, "reveal", lambda: pytest.fail("Errors must not steal focus"))
     monkeypatch.setattr("better_voice_input.app.current_target", lambda: None)
-    monkeypatch.setattr("better_voice_input.app.models_ready", lambda _: failure != "models")
+    monkeypatch.setattr("better_voice_input.app.models_ready", lambda *args, **kwargs: failure != "models")
     monkeypatch.setattr("better_voice_input.app.modifiers_held", lambda: False)
     window.from_hotkey = True
     if failure in ("models", "microphone"):

@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 from .cleanup import ApiCleaner, CleanupError
+from .models import CATALOG
 from .settings import Settings, read_key
 
 
@@ -20,6 +21,10 @@ def main() -> int:
     transcribe.add_argument("input", type=Path)
     transcribe.add_argument("--clean", action="store_true")
     transcribe.add_argument("--directory", type=Path)
+    for command in (download, transcribe):
+        command.add_argument(
+            "--asr-model", choices=[model.id for model in CATALOG], help="本地语音模型，默认使用设置中的选择"
+        )
     for command in (clean, transcribe):
         command.add_argument("--key-file", type=Path)
         command.add_argument("--model", default=None)
@@ -28,8 +33,10 @@ def main() -> int:
     args = parser.parse_args()
     settings = Settings.load()
     try:
+        asr_model = getattr(args, "asr_model", None) or settings.asr_model
+        model_dir = getattr(args, "directory", None) or settings.model_path(asr_model)
         if args.command == "download-models":
-            from .models import download_models
+            from .models import download_model, get_model
 
             last = [-1]
 
@@ -38,7 +45,7 @@ def main() -> int:
                     print(f"{percent}% {name}", flush=True)
                     last[0] = percent // 10
 
-            download_models(args.directory or settings.models, progress=progress)
+            download_model(get_model(asr_model), model_dir, progress=progress)
             return 0
         data = {}
         if args.command == "transcribe":
@@ -48,7 +55,7 @@ def main() -> int:
             started = time.monotonic()
             audio = decode_audio(args.input)
             data["duration"] = round(audio.size / 16000, 2)
-            recognizer = LocalRecognizer(args.directory or settings.models)
+            recognizer = LocalRecognizer(model_dir, asr_model)
             text = recognizer.transcribe(audio)
             del audio
             data.update(original=text, asr_seconds=round(time.monotonic() - started, 2))
@@ -75,7 +82,7 @@ def main() -> int:
             args.output.write_text(rendered, encoding="utf-8")
         print(rendered)
         return 0
-    except (CleanupError, OSError, RuntimeError) as exc:
+    except (CleanupError, OSError, RuntimeError) as exc:  # ModelError is a RuntimeError.
         print(str(exc))
         return 1
 

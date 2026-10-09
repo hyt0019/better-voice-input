@@ -51,11 +51,26 @@
 
 文字历史默认关闭；开启后使用 Windows 当前用户加密，**最多只保留最近 5 条，最长 7 天**。新增第 6 条时移除最早的一条。程序启动、访问或新增历史时清理超额和过期记录，包括旧版本留下的历史；关闭开关会停止新增。“历史 → 清空全部历史”可立即删除已保存的文字。
 
+## 语音模型
+
+点击主窗口右上角“语音模型”，或录音卡片中的模型标签，可以下载和切换本地识别模型。默认使用 SenseVoice Small，不选择其他模型时保持不变。听写是实时任务，候选只保留识别耗时与 SenseVoice 同一量级的小模型。
+
+| 模型 | 大小 | 适合 |
+|---|---|---|
+| SenseVoice Small（默认） | 约 240 MB | 速度最快，中文准确，自带标点；中文里的英文词和人名偶尔听成近音词 |
+| X-ASR 中英 | 约 180 MB | 体积最小，英文和中英混说更准，大小写规范，速度与 SenseVoice 相当 |
+| Canary 180M Flash | 约 210 MB | 英文最强，公开榜单准确率超过 Whisper-large-v3，自带标点和大小写；只识别英文（及德、法、西班牙语），说中文时请切回 |
+
+- 点击“下载”开始下载。下载在后台进行，可以关闭窗口继续使用当前模型；完成后点击“使用此模型”才会切换。
+- 窗口顶部可以更改下载位置并查看剩余空间。更改后新下载保存到新位置，已下载的模型留在原处，不需要重新下载。
+- 未使用的模型可以删除以释放空间；删除只移除该模型自己的文件。默认的 SenseVoice 不提供删除。
+- 切换后第一次识别需要几秒加载模型。所有模型都在本机识别，录音不会上传。
+
 ## 数据位置
 
 - 设置：`%LOCALAPPDATA%/BetterVoiceInput/settings.json`，不包含密钥。
 - 可选加密历史：同目录 `history.json`。
-- 模型：优先使用设置中的 `model_dir`，其次是可执行文件旁的 `models`；从项目 `dist/BetterVoiceInput` 运行时也会查找项目根目录的 `models`。最后使用上述用户目录下的 `models`。本机模型已安装在项目根目录，不需要再次下载。
+- 模型：默认下载位置优先使用设置中的 `model_dir`，其次是可执行文件旁的 `models`；从项目 `dist/BetterVoiceInput` 运行时也会查找项目根目录的 `models`，最后使用上述用户目录下的 `models`。SenseVoice 位于该文件夹根目录，其他模型各占一个子文件夹（`x-asr-zh-en`、`canary-180m-flash`）。在“语音模型”中更改下载位置后，设置会记录 `download_dir`，已下载模型的位置记录在 `model_paths`。本机 SenseVoice 已安装在项目根目录，不需要再次下载。
 - Key：Windows 凭据管理器，服务名 `better-voice-input`，不同 API 地址使用独立凭据。开发测试可同时设置 `BVI_API_KEY` 和匹配的 `BVI_API_BASE_URL`；旧 `DEEPSEEK_API_KEY` 和根目录 `deepseek api key.txt` 只会用于 DeepSeek 官方接口。
 - 音频在本机识别。转写和相关词库发送至所选 API，服务可用性和计费由所选服务商决定。
 
@@ -71,7 +86,9 @@
 
 **下载或 API 连接失败**：检查网络及代理。支持标准 `HTTPS_PROXY` / `HTTP_PROXY` 环境变量；不要把代理凭据或 API Key 写入仓库。程序不会自动上传音频到其他服务。
 
-**模型下载中断**：重新点击下载；已完成且通过校验的文件会复用，未完成文件重新下载。
+**模型下载中断**：重新点击下载；已完成且通过校验的文件会复用，未完成文件重新下载。所选位置空间不足时会提示更改下载位置。
+
+**用 Canary 说中文结果乱码**：Canary 只识别英文等欧洲语言，说中文或中英混说时请切回 SenseVoice 或 X-ASR。
 
 **出现 SmartScreen 提示**：本地打包程序尚未购买代码签名证书，可从源码复现构建；不要通过关闭系统防护解决。
 
@@ -84,7 +101,9 @@
 ```powershell
 .\.venv\Scripts\python.exe -m better_voice_input.app
 .\.venv\Scripts\python.exe -m better_voice_input.cli download-models --directory models
+.\.venv\Scripts\python.exe -m better_voice_input.cli download-models --asr-model canary
 .\.venv\Scripts\python.exe -m better_voice_input.cli transcribe '录音.m4a' --clean --output private/result.json
+.\.venv\Scripts\python.exe -m better_voice_input.cli transcribe '录音.m4a' --asr-model xasr
 .\.venv\Scripts\python.exe scripts/evaluate_text.py
 .\scripts\build.ps1
 ```

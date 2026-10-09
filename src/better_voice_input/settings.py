@@ -3,11 +3,14 @@ from __future__ import annotations
 import json
 import os
 import sys
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 from .api_config import DEFAULT_API_BASE_URL, chat_completion_url, credential_account, is_deepseek_api
+from .models import CATALOG, DEFAULT_MODEL, get_model, models_ready
 from .shortcuts import DEFAULT_HOTKEY, HOTKEYS
+
+MODEL_IDS = {model.id for model in CATALOG}
 
 SERVICE = "better-voice-input"
 
@@ -49,10 +52,37 @@ class Settings:
     start_on_login: bool = False
     glossary: list[str] = field(default_factory=lambda: ["DeepSeek", "API", "Windows", "Ctrl", "Shift"])
     api_timeout: float = 25.0
+    asr_model: str = DEFAULT_MODEL
+    # Where new model downloads go. Models downloaded before a location change
+    # are pinned in model_paths so they never need to be downloaded again.
+    download_dir: str = ""
+    model_paths: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def download_root(self) -> Path:
+        if self.download_dir:
+            return Path(self.download_dir)
+        return Path(self.model_dir) if self.model_dir else default_model_dir()
+
+    def model_path(self, model_id: str | None = None) -> Path:
+        model = get_model(model_id or self.asr_model)
+        if model.id in self.model_paths:
+            return Path(self.model_paths[model.id])
+        return self.download_root / model.folder if model.folder else self.download_root
 
     @property
     def models(self) -> Path:
-        return Path(self.model_dir) if self.model_dir else default_model_dir()
+        """Directory of the selected speech model."""
+        return self.model_path()
+
+    def with_download_root(self, directory: Path) -> Settings:
+        """Change the download location while keeping downloaded models where they are."""
+        pinned = dict(self.model_paths)
+        for model in CATALOG:
+            current = self.model_path(model.id)
+            if model.id not in pinned and models_ready(current, model=model):
+                pinned[model.id] = str(current)
+        return replace(self, download_dir=str(directory), model_paths=pinned)
 
     @classmethod
     def load(cls, path: Path | None = None) -> Settings:
@@ -72,6 +102,16 @@ class Settings:
                 elif key == "glossary":
                     if isinstance(value, list) and all(isinstance(word, str) for word in value):
                         values[key] = [word[:80] for word in value[:100]]
+                elif key == "asr_model":
+                    if value in MODEL_IDS:
+                        values[key] = value
+                elif key == "model_paths":
+                    if isinstance(value, dict):
+                        values[key] = {
+                            name: path
+                            for name, path in value.items()
+                            if name in MODEL_IDS and isinstance(path, str) and path
+                        }
                 elif type(value) is type(getattr(defaults, key)):
                     values[key] = value
             if "hotkey" in values and values["hotkey"] not in HOTKEYS:

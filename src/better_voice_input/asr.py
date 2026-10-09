@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from threading import Event
 from typing import Callable
@@ -10,21 +11,58 @@ import sherpa_onnx
 
 from .audio import SAMPLE_RATE
 from .cleanup import Cancelled
-from .models import ModelError, models_ready
+from .models import DEFAULT_MODEL, ModelError, get_model, models_ready
+
+
+_CJK_PUNCT = "\u3000-\u303f\uff00-\uffef"
+_SPACING = re.compile(
+    rf"\s+(?=[{_CJK_PUNCT}])|(?<=[{_CJK_PUNCT}])\s+|(?<=[\u4e00-\u9fff])\s+(?=[\u4e00-\u9fff])"
+)
+
+
+def tidy_spacing(text: str) -> str:
+    """Drop spaces some models emit around Chinese punctuation and between Chinese characters."""
+    return _SPACING.sub("", text)
+
+
+def create_recognizer(directory: Path, model_id: str):
+    model = get_model(model_id)
+    path = lambda name: str(directory / name)  # noqa: E731
+    threads = min(4, max(1, (os.cpu_count() or 2) // 2))
+    if model.kind == "transducer":
+        return sherpa_onnx.OfflineRecognizer.from_transducer(
+            encoder=path("encoder-epoch-99-avg-1.int8.onnx"),
+            decoder=path("decoder-epoch-99-avg-1.onnx"),
+            joiner=path("joiner-epoch-99-avg-1.int8.onnx"),
+            tokens=path("tokens.txt"),
+            num_threads=threads,
+        )
+    if model.kind == "nemo_canary":
+        return sherpa_onnx.OfflineRecognizer.from_nemo_canary(
+            encoder=path("encoder.int8.onnx"),
+            decoder=path("decoder.int8.onnx"),
+            tokens=path("tokens.txt"),
+            src_lang="en",
+            tgt_lang="en",
+            num_threads=threads,
+        )
+    return sherpa_onnx.OfflineRecognizer.from_sense_voice(
+        model=path("model.int8.onnx"),
+        tokens=path("tokens.txt"),
+        num_threads=threads,
+        language="auto",
+        use_itn=True,
+    )
 
 
 class LocalRecognizer:
-    def __init__(self, directory: Path):
-        if not models_ready(directory, verify=True):
-            raise ModelError("本地语音模型未就绪或校验失败，请在设置中下载模型。")
+    def __init__(self, directory: Path, model: str = DEFAULT_MODEL):
+        spec = get_model(model)
+        if not models_ready(directory, verify=True, model=spec):
+            raise ModelError(f"{spec.name} 未就绪或校验失败，请在“语音模型”中重新下载。")
         self.directory = directory
-        self.recognizer = sherpa_onnx.OfflineRecognizer.from_sense_voice(
-            model=str(directory / "model.int8.onnx"),
-            tokens=str(directory / "tokens.txt"),
-            num_threads=min(4, max(1, (os.cpu_count() or 2) // 2)),
-            language="auto",
-            use_itn=True,
-        )
+        self.model = spec.id
+        self.recognizer = create_recognizer(directory, spec.id)
 
     def transcribe(
         self, samples: np.ndarray, cancel: Event | None = None, partial: Callable[[str], None] | None = None
@@ -69,11 +107,21 @@ class LocalRecognizer:
             stream = self.recognizer.create_stream()
             stream.accept_waveform(SAMPLE_RATE, samples[left:right])
             self.recognizer.decode_stream(stream)
-            text = stream.result.text.strip()
+            text = tidy_spacing(stream.result.text.strip())
             if text:
                 texts.append(text)
                 if partial:
-                    partial("".join(texts))
+                    partial(join_segments(texts))
         if cancel and cancel.is_set():
             raise Cancelled("已取消识别。")
-        return "".join(texts)
+        return join_segments(texts)
+
+
+def join_segments(texts: list[str]) -> str:
+    joined = ""
+    for text in texts:
+        # English segments need a separating space; Chinese ones do not.
+        if joined and joined[-1].isascii() and not joined[-1].isspace() and text[0].isascii() and text[0].isalnum():
+            joined += " "
+        joined += text
+    return joined

@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QApplication,
     QDialog,
     QFileDialog,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -20,7 +19,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QProgressBar,
-    QPushButton,
+    QSizePolicy,
     QSplitter,
     QSystemTrayIcon,
     QVBoxLayout,
@@ -30,23 +29,50 @@ from PySide6.QtWidgets import (
 from .audio import AudioError, Recorder
 from .core import single_line_text
 from .history import HistoryStore
-from .models import models_ready
-from .pipeline import Events, Pipeline
+from .models import get_model, models_ready
+from .pipeline import Events, ModelDownloads, Pipeline
 from .session import SessionGate
 from .settings import Settings, data_dir, read_key
 from .shortcuts import DEFAULT_HOTKEY, HOTKEYS, INSERT_HOTKEY
 from .startup import StartupError, save_settings_with_startup, startup_enabled
-from .ui import STYLE, RecordingOverlay, SettingsDialog, app_icon, text_column
+from .ui import (
+    STYLE,
+    Glyph,
+    HeroCard,
+    LevelBars,
+    MicButton,
+    ModelDialog,
+    RecordingOverlay,
+    SettingsDialog,
+    app_icon,
+    dialog_header,
+    footer_bar,
+    glyph_label,
+    icon_text,
+    label,
+    make_button,
+    repolish,
+    text_column,
+)
 from .windows import Hotkeys, PasteError, current_target, modifiers_held, paste_text, shortcut_held
+
+IDLE_STATS = "音频只在本机识别，录音不落盘；整理时仅发送文字至所选 API。"
 
 
 class MainWindow(QMainWindow):
+    PILLS = {
+        "recording": ("rec", "● 录音中"),
+        "busy": ("busy", "● 处理中"),
+        "waiting": ("busy", "● 等待选择输入框"),
+    }
+
     def __init__(self, settings: Settings | None = None, native: bool = True):
         super().__init__()
         self.settings = settings or Settings.load()
         self.gate = SessionGate()
         self.events = Events()
         self.pipeline = Pipeline(self.events)
+        self.downloads = ModelDownloads()
         self.recorder = Recorder(self.events.level.emit)
         self.state = "idle"
         self.target = None
@@ -66,7 +92,9 @@ class MainWindow(QMainWindow):
         self.events.completed.connect(self.on_complete)
         self.events.failed.connect(self.on_error)
         self.events.level.connect(self.on_level)
-        self.events.downloaded.connect(self.on_downloaded)
+        self.downloads.progress.connect(self.on_download_progress)
+        self.downloads.finished.connect(self.on_download_finished)
+        self.downloads.failed.connect(self.on_download_failed)
         self.timer = QTimer(self)
         self.timer.setInterval(60)
         self.timer.timeout.connect(self.tick)
@@ -92,66 +120,85 @@ class MainWindow(QMainWindow):
             self.hotkeys.events.triggered.connect(self.on_hotkey)
             self.configure_hotkeys()
         self.refresh_controls()
+        self.original.setFocus()
 
     def _build_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
-        layout.setContentsMargins(30, 24, 30, 20)
-        layout.setSpacing(18)
+        layout.setContentsMargins(28, 22, 28, 16)
+        layout.setSpacing(16)
         header = QHBoxLayout()
+        header.setSpacing(10)
         logo = QLabel()
-        logo.setPixmap(self.windowIcon().pixmap(44, 44))
+        logo.setPixmap(self.windowIcon().pixmap(46, 46))
         header.addWidget(logo)
+        header.addSpacing(4)
         brand = QVBoxLayout()
-        brand.setSpacing(1)
-        title = QLabel("好好说")
-        title.setObjectName("brand")
-        subtitle = QLabel("保留你的意思，整理你的表达。")
-        subtitle.setObjectName("muted")
-        brand.addWidget(title)
-        brand.addWidget(subtitle)
+        brand.setSpacing(0)
+        brand.addWidget(label("好好说", "brand"))
+        brand.addWidget(label("保留你的意思，整理你的表达。", "muted"))
         header.addLayout(brand)
         header.addStretch()
-        self.history_button = QPushButton("历史")
+        self.history_button = make_button("历史", Glyph.HISTORY, "toolbar")
         self.history_button.clicked.connect(self.open_history)
-        header.addWidget(self.history_button)
-        self.import_button = QPushButton("导入录音")
+        self.import_button = make_button("导入录音", Glyph.IMPORT, "toolbar")
         self.import_button.clicked.connect(self.import_audio)
-        self.settings_button = QPushButton("设置")
+        self.models_button = make_button("语音模型", Glyph.MODEL, "toolbar")
+        self.models_button.clicked.connect(self.open_models)
+        self.settings_button = make_button("设置", Glyph.SETTINGS, "toolbar")
         self.settings_button.clicked.connect(self.open_settings)
-        header.addWidget(self.import_button)
-        header.addWidget(self.settings_button)
+        for button in (self.history_button, self.import_button, self.models_button, self.settings_button):
+            header.addWidget(button)
         layout.addLayout(header)
 
-        band = QFrame()
-        band.setObjectName("recorder")
-        recording = QHBoxLayout(band)
-        recording.setContentsMargins(22, 20, 22, 20)
+        hero = HeroCard()
+        recording = QHBoxLayout(hero)
+        recording.setContentsMargins(30, 24, 22, 20)
+        recording.setSpacing(20)
         status_layout = QVBoxLayout()
-        status_layout.setSpacing(7)
-        self.status = QLabel("准备好，慢慢说")
-        self.status.setObjectName("status")
-        self.hint = QLabel("按住快捷键说话，松开后自动整理并输入。停顿和改口都没关系。")
-        self.hint.setObjectName("muted")
-        self.hint.setWordWrap(True)
-        self.meter = QProgressBar()
-        self.meter.setTextVisible(False)
-        self.meter.setRange(0, 100)
-        self.meter.setValue(0)
+        status_layout.setSpacing(8)
+        pill_row = QHBoxLayout()
+        self.pill = label("● 就绪", "pill")
+        pill_row.addWidget(self.pill)
+        pill_row.addStretch()
+        status_layout.addLayout(pill_row)
+        self.status = label("准备好，慢慢说", "status")
+        self.hint = label("按住快捷键说话，松开后自动整理并输入。停顿和改口都没关系。", "heroHint", wrap=True)
+        self.meter = LevelBars(56)
         status_layout.addWidget(self.status)
         status_layout.addWidget(self.hint)
+        status_layout.addSpacing(2)
         status_layout.addWidget(self.meter)
+        chips = QHBoxLayout()
+        chips.setSpacing(8)
+        self.shortcut_label = label("", "heroChip")
+        self.insert_label = label(f"{INSERT_HOTKEY}  补输结果", "heroChip")
+        self.model_chip = make_button("", Glyph.MODEL, "heroChip", "#9FD9D1")
+        self.model_chip.setToolTip("更换或下载本地语音模型")
+        self.model_chip.clicked.connect(self.open_models)
+        chips.addWidget(self.shortcut_label)
+        chips.addWidget(self.insert_label)
+        chips.addWidget(self.model_chip)
+        chips.addStretch()
+        status_layout.addLayout(chips)
         recording.addLayout(status_layout, 1)
-        self.record_button = QPushButton("开始录音")
+        controls = QVBoxLayout()
+        controls.setSpacing(4)
+        controls.addStretch()
+        self.record_button = MicButton("开始录音")
         self.record_button.setObjectName("primary")
-        self.record_button.setMinimumSize(150, 54)
         self.record_button.clicked.connect(lambda: self.toggle_recording(False))
-        recording.addWidget(self.record_button)
-        self.cancel_button = QPushButton("取消")
+        controls.addWidget(self.record_button, 0, Qt.AlignmentFlag.AlignHCenter)
+        self.cancel_button = make_button("取消", None, "heroGhost")
+        policy = self.cancel_button.sizePolicy()
+        policy.setRetainSizeWhenHidden(True)
+        self.cancel_button.setSizePolicy(policy)
         self.cancel_button.clicked.connect(self.cancel)
-        recording.addWidget(self.cancel_button)
-        layout.addWidget(band)
+        controls.addWidget(self.cancel_button, 0, Qt.AlignmentFlag.AlignHCenter)
+        controls.addStretch()
+        recording.addLayout(controls)
+        layout.addWidget(hero)
 
         self.notice = QLabel()
         self.notice.setObjectName("notice")
@@ -161,12 +208,13 @@ class MainWindow(QMainWindow):
         self.notice.hide()
         layout.addWidget(self.notice)
         splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setHandleWidth(18)
+        splitter.setHandleWidth(16)
+        splitter.setChildrenCollapsible(False)
         original_widget, self.original, _ = text_column(
             "原始识别", "录音后，原始识别文字会出现在这里。\n\n也可以粘贴一段文字，直接测试整理效果。"
         )
         result_widget, self.result, _ = text_column(
-            "整理结果", "结巴、重复和明确的改口会被整理。\n\n原文保留在左侧，结果可以直接编辑。"
+            "整理结果", "结巴、重复和明确的改口会被整理。\n\n原文保留在左侧，结果可以直接编辑。", accent=True
         )
         splitter.addWidget(original_widget)
         splitter.addWidget(result_widget)
@@ -176,39 +224,44 @@ class MainWindow(QMainWindow):
         self.result.textChanged.connect(self.result_edited)
 
         actions = QHBoxLayout()
-        self.clean_button = QPushButton("整理文字")
+        actions.setSpacing(8)
+        self.clean_button = make_button("整理文字", Glyph.EDIT)
         self.clean_button.clicked.connect(self.clean_text)
-        self.copy_original_button = QPushButton("复制原文")
+        self.copy_original_button = make_button("复制原文", Glyph.COPY, "ghost")
         self.copy_original_button.clicked.connect(lambda: self.copy_text(False))
-        self.clear_button = QPushButton("清空")
+        self.clear_button = make_button("清空", Glyph.CLEAR, "ghost")
         self.clear_button.clicked.connect(self.clear)
         actions.addWidget(self.clean_button)
         actions.addWidget(self.copy_original_button)
         actions.addWidget(self.clear_button)
         actions.addStretch()
-        self.copy_button = QPushButton("复制结果")
+        self.copy_button = make_button("复制结果", Glyph.COPY)
         self.copy_button.clicked.connect(lambda: self.copy_text(True))
-        self.insert_button = QPushButton("输入到其他窗口")
-        self.insert_button.setObjectName("primary")
+        self.insert_button = make_button("输入到其他窗口", Glyph.SEND, "primary")
         self.insert_button.clicked.connect(self.schedule_manual_insert)
         actions.addWidget(self.copy_button)
         actions.addWidget(self.insert_button)
         layout.addLayout(actions)
-        self.stats = QLabel("录音不落盘；可在设置中开启本机加密历史，最多保留 5 条。")
-        self.stats.setObjectName("muted")
-        layout.addWidget(self.stats)
+
         bottom = QHBoxLayout()
-        self.shortcut_label = QLabel()
-        self.shortcut_label.setObjectName("muted")
-        bottom.addWidget(self.shortcut_label)
-        bottom.addStretch()
-        self.download_button = QPushButton("下载语音模型")
-        self.download_button.clicked.connect(self.download)
+        bottom.setSpacing(8)
+        bottom.addWidget(glyph_label(Glyph.LOCK, "#8A938F", 13))
+        self.stats = label(IDLE_STATS, "caption")
+        self.stats.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        bottom.addWidget(self.stats, 1)
+        self.download_status = label("", "caption")
+        self.download_status.hide()
+        bottom.addWidget(self.download_status)
+        self.download_progress = QProgressBar()
+        self.download_progress.setTextVisible(False)
+        self.download_progress.setRange(0, 100)
+        self.download_progress.setFixedWidth(140)
+        self.download_progress.hide()
+        bottom.addWidget(self.download_progress)
+        self.download_button = make_button("下载语音模型", Glyph.DOWNLOAD, "primary")
+        self.download_button.clicked.connect(self.open_models)
         bottom.addWidget(self.download_button)
         layout.addLayout(bottom)
-        privacy = QLabel("音频留在本机，整理时发送文字至所选 API。")
-        privacy.setObjectName("muted")
-        layout.addWidget(privacy)
 
     def refresh_controls(self):
         if not hasattr(self, "clean_button"):
@@ -217,12 +270,13 @@ class MainWindow(QMainWindow):
         self.record_button.setEnabled(self.state in ("idle", "recording"))
         self.record_button.setText("结束并整理" if self.state == "recording" else "开始录音")
         self.record_button.setObjectName("recording" if self.state == "recording" else "primary")
-        self.record_button.style().unpolish(self.record_button)
-        self.record_button.style().polish(self.record_button)
+        self.record_button.set_busy(self.state == "busy")
         self.cancel_button.setVisible(not idle)
         self.import_button.setEnabled(idle)
         self.settings_button.setEnabled(idle)
         self.history_button.setEnabled(idle)
+        self.models_button.setEnabled(idle)
+        self.model_chip.setEnabled(idle)
         self.clean_button.setEnabled(idle and bool(self.original.toPlainText().strip()))
         self.copy_original_button.setEnabled(bool(self.original.toPlainText().strip()))
         self.copy_button.setEnabled(bool(self.result.toPlainText().strip()))
@@ -232,11 +286,21 @@ class MainWindow(QMainWindow):
         self.clear_button.setEnabled(idle)
         self.original.setReadOnly(not idle)
         self.result.setReadOnly(not idle)
-        ready = models_ready(self.settings.models)
-        self.download_button.setVisible(not ready)
+        model = get_model(self.settings.asr_model)
+        ready = models_ready(self.settings.models, model=model.id)
+        self.download_button.setVisible(not ready and self.downloads.active is None)
         self.download_button.setEnabled(idle)
-        action = "按住说话，松开结束" if self.settings.hold_to_talk else "按一下开始，再按结束"
-        self.shortcut_label.setText(f"{self.settings.hotkey}：{action}    {INSERT_HOTKEY}：补输结果")
+        self.model_chip.setText(icon_text(f"{model.name}  ·  {'本机识别' if ready else '未下载'}"))
+        if self.state in self.PILLS:
+            tone, text = self.PILLS[self.state]
+        else:
+            tone, text = ("done", "● 已整理") if self.result.toPlainText().strip() else ("idle", "● 就绪")
+        self.pill.setText(text)
+        if self.pill.property("tone") != tone:
+            self.pill.setProperty("tone", tone)
+            repolish(self.pill)
+        action = "按住说话" if self.settings.hold_to_talk else "按一下开始，再按结束"
+        self.shortcut_label.setText(f"{self.settings.hotkey}  {action}")
 
     def result_edited(self):
         if self.state == "idle":
@@ -287,9 +351,13 @@ class MainWindow(QMainWindow):
         if self.state != "idle":
             return
         self.from_hotkey = from_hotkey
-        if not models_ready(self.settings.models):
-            self.set_notice("请先点击“下载语音模型”，首次需要下载约 240 MB。")
-            self.feedback("语音模型未就绪", "点击托盘图标，下载语音模型")
+        model = get_model(self.settings.asr_model)
+        if not models_ready(self.settings.models, model=model.id):
+            if self.downloads.active == model.id:
+                self.set_notice(f"{model.name} 正在下载，完成后即可录音。")
+            else:
+                self.set_notice(f"请先点击“下载语音模型”，下载 {model.name}（{model.size_label}）。")
+            self.feedback("语音模型未就绪", "点击托盘图标，下载语音模型", tone="warn")
             return
         target = current_target() if from_hotkey else None
         self.target = target if target and target.process != os.getpid() else None
@@ -310,6 +378,7 @@ class MainWindow(QMainWindow):
         self.overlay.label.setText("正在听  00:00")
         self.overlay.level.setValue(0)
         self.overlay.level.show()
+        self.overlay.set_tone("rec")
         self.overlay.show_near_bottom()
 
     def stop_recording(self):
@@ -327,6 +396,7 @@ class MainWindow(QMainWindow):
         self.hint.setText("原始转写会保留，识别后再整理整段表达。")
         self.overlay.label.setText("正在识别和整理…")
         self.overlay.hint.setText("Esc 取消本次处理")
+        self.overlay.set_tone("busy")
         self.refresh_controls()
         self.pipeline.start(self.gate.generation, self.gate.cancel_event, self.settings, samples, "audio")
 
@@ -371,8 +441,10 @@ class MainWindow(QMainWindow):
         self.result.setPlainText(result.text)
         self.finish_ui()
         warnings = list(result.warnings) + self.extra_warnings
+        model = get_model(self.settings.asr_model).name
         self.stats.setText(
-            f"本地识别 {data['asr_seconds']:.1f} 秒    文字整理 {result.elapsed:.1f} 秒    本次 {result.usage.get('total_tokens', 0)} tokens"
+            f"{model} 识别 {data['asr_seconds']:.1f} 秒    文字整理 {result.elapsed:.1f} 秒    "
+            f"本次 {result.usage.get('total_tokens', 0)} tokens"
         )
         if self.settings.save_history:
             try:
@@ -387,10 +459,10 @@ class MainWindow(QMainWindow):
         else:
             self.feedback("整理好了，结果已保留", f"在目标输入框按 {INSERT_HOTKEY} 输入")
 
-    def feedback(self, title: str, hint: str, milliseconds: int = 4500):
+    def feedback(self, title: str, hint: str, milliseconds: int = 4500, tone: str = "done"):
         """Global dictation never activates the main window, including failures."""
         if self.from_hotkey:
-            self.overlay.show_message(title, hint, milliseconds)
+            self.overlay.show_message(title, hint, milliseconds, tone)
             self.tray.setToolTip(f"好好说 · {title}")
         else:
             self.reveal()
@@ -414,7 +486,7 @@ class MainWindow(QMainWindow):
             self.gate.inserted = False
             self.set_notice(str(exc))
             self.refresh_controls()
-            self.feedback("未能自动输入，结果已保留", "点击托盘图标查看原因或复制结果")
+            self.feedback("未能自动输入，结果已保留", "点击托盘图标查看原因或复制结果", tone="warn")
 
     def schedule_manual_insert(self):
         if self.state != "idle" or not self.result.toPlainText().strip() or self.gate.inserted:
@@ -460,8 +532,8 @@ class MainWindow(QMainWindow):
     def process_file(self, path: str):
         if self.state != "idle":
             return
-        if not models_ready(self.settings.models):
-            self.set_notice("请先下载本地语音模型。")
+        if not models_ready(self.settings.models, model=self.settings.asr_model):
+            self.set_notice("请先在“语音模型”中下载当前选择的模型。")
             return
         self.target = None
         self.from_hotkey = False
@@ -469,21 +541,51 @@ class MainWindow(QMainWindow):
         self.original.clear()
         self.pipeline.start(job, cancel, self.settings, path, "file")
 
-    def download(self):
+    def open_models(self):
         if self.state != "idle":
             return
-        self.target = None
-        self.from_hotkey = False
-        job, cancel = self.begin("download")
-        self.status.setText("正在下载语音模型…")
-        self.hint.setText("约 240 MB，仅首次需要。下载后会核对完整性。")
-        self.pipeline.start(job, cancel, self.settings, None, "download")
+        dialog = ModelDialog(self.settings, self.downloads, self.apply_model_settings, self)
+        dialog.exec()
+        self.refresh_controls()
 
-    def on_downloaded(self, job: int):
-        if self.gate.accepts(job):
-            self.finish_ui()
+    def apply_model_settings(self, new: Settings) -> bool:
+        try:
+            new.save()
+        except OSError:
+            return False
+        previous = self.settings
+        self.settings = new
+        if (new.asr_model, new.models) != (previous.asr_model, previous.models):
+            self.pipeline.release_recognizer()  # Loaded again on the next recognition.
+        self.refresh_controls()
+        return True
+
+    def on_download_progress(self, model_id: str, percent: int):
+        self.download_status.setText(f"正在下载 {get_model(model_id).name}  {percent}%")
+        self.download_progress.setValue(percent)
+        self.download_status.show()
+        self.download_progress.show()
+        self.download_button.hide()
+
+    def on_download_finished(self, model_id: str):
+        self.download_status.hide()
+        self.download_progress.hide()
+        model = get_model(model_id)
+        if model_id == self.settings.asr_model and self.state == "idle":
             self.status.setText("语音模型已就绪")
             self.hint.setText("现在可以开始录音，也可以导入已有录音。")
+        else:
+            self.stats.setText(f"{model.name} 已下载，可在“语音模型”中切换使用。")
+        if not self.isVisible() and self.native:
+            self.tray.showMessage("好好说", f"{model.name} 已下载完成。", QSystemTrayIcon.MessageIcon.Information, 3000)
+        self.refresh_controls()
+
+    def on_download_failed(self, model_id: str, message: str):
+        self.download_status.hide()
+        self.download_progress.hide()
+        if message:
+            self.set_notice(f"{get_model(model_id).name}：{message}")
+        self.refresh_controls()
 
     def on_error(self, job: int, message: str):
         if self.gate.accepts(job):
@@ -491,7 +593,7 @@ class MainWindow(QMainWindow):
             self.status.setText("本次处理未完成")
             self.hint.setText("原始文字已保留，可以复制或重新整理。")
             self.set_notice(message)
-            self.feedback("本次处理未完成", "点击托盘图标查看原因或重试")
+            self.feedback("本次处理未完成", "点击托盘图标查看原因或重试", tone="warn")
 
     def cancel(self):
         if self.state == "idle":
@@ -510,7 +612,7 @@ class MainWindow(QMainWindow):
         self.result.clear()
         self.set_notice()
         self.status.setText("准备好，慢慢说")
-        self.stats.setText("录音不落盘；可在设置中开启本机加密历史，最多保留 5 条。")
+        self.stats.setText(IDLE_STATS)
 
     def copy_text(self, result: bool):
         text = single_line_text(self.result.toPlainText() if result else self.original.toPlainText())
@@ -560,22 +662,34 @@ class MainWindow(QMainWindow):
             return
         dialog = QDialog(self)
         dialog.setWindowTitle("本机历史 · 好好说")
-        dialog.resize(650, 440)
+        dialog.resize(680, 500)
         layout = QVBoxLayout(dialog)
-        layout.addWidget(QLabel("默认不保存。开启后仅保留最近 5 条文字，超过 7 天自动清理。"))
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(dialog_header("本机历史", "默认不保存。开启后仅保留最近 5 条文字，超过 7 天自动清理。"))
+        body = QVBoxLayout()
+        body.setContentsMargins(30, 6, 30, 22)
         listing = QListWidget()
+        listing.setWordWrap(True)
         for row in rows:
             date = time.strftime("%m-%d %H:%M", time.localtime(row["created"]))
-            listing.addItem(f"{date}  {row['text'][:70].replace(chr(10), ' ')}")
-        layout.addWidget(listing)
-        actions = QHBoxLayout()
-        load_button = QPushButton("载入选中记录")
+            listing.addItem(f"{date}    {row['text'][:90].replace(chr(10), ' ')}")
+        empty = label("还没有历史记录。可以在“设置 → 隐私与启动”中开启。", "muted")
+        empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty.setVisible(not rows)
+        listing.setVisible(bool(rows))
+        body.addWidget(listing, 1)
+        body.addWidget(empty, 1)
+        layout.addLayout(body, 1)
+        footer, actions = footer_bar()
+        clear_button = make_button("清空全部历史", Glyph.DELETE, "danger", "#B4443C")
+        clear_button.setEnabled(bool(rows))
+        load_button = make_button("载入选中记录", None, "primary")
         load_button.setEnabled(bool(rows))
-        clear_button = QPushButton("清空全部历史")
-        actions.addWidget(load_button)
-        actions.addStretch()
         actions.addWidget(clear_button)
-        layout.addLayout(actions)
+        actions.addStretch()
+        actions.addWidget(load_button)
+        layout.addWidget(footer)
 
         def load():
             index = listing.currentRow()
@@ -595,6 +709,9 @@ class MainWindow(QMainWindow):
                 rows.clear()
                 listing.clear()
                 load_button.setEnabled(False)
+                clear_button.setEnabled(False)
+                listing.hide()
+                empty.show()
             except OSError:
                 QMessageBox.warning(dialog, "无法清空", "请检查本地目录权限。")
 
@@ -618,6 +735,7 @@ class MainWindow(QMainWindow):
             event.accept()
 
     def shutdown(self):
+        self.downloads.cancel(wait=2)
         self.gate.cancel()
         self.recorder.cancel()
         self.timer.stop()
@@ -656,7 +774,7 @@ def main() -> int:
     except OSError:
         window.set_notice("旧历史清理失败，请在“历史”中清空或检查本地目录权限。")
     background_ready = (
-        models_ready(window.settings.models)
+        models_ready(window.settings.models, model=window.settings.asr_model)
         and bool(read_key(api_base_url=window.settings.api_base_url))
         and QSystemTrayIcon.isSystemTrayAvailable()
         and (args.smoke or 1 in window.hotkeys.registered)

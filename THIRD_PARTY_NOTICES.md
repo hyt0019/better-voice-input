@@ -5,9 +5,12 @@
 | 组件 | 用途 | 上游 |
 |---|---|---|
 | Python | 运行时 | https://www.python.org/ |
+| Segoe Fluent Icons | 界面图标，使用 Windows 系统字体，不随程序分发 | https://learn.microsoft.com/windows/apps/design/style/segoe-fluent-icons-font |
 | Qt / PySide6 Essentials | 桌面界面 | https://www.qt.io/qt-for-python |
 | sherpa-onnx / ONNX Runtime | 本地语音推理 | https://github.com/k2-fsa/sherpa-onnx |
-| SenseVoice | 语音识别模型 | https://github.com/FunAudioLLM/SenseVoice |
+| SenseVoice | 语音识别模型（默认） | https://github.com/FunAudioLLM/SenseVoice |
+| X-ASR zh-en | 可选语音识别模型，Apache-2.0 | https://huggingface.co/GilgameshWind/X-ASR-zh-en |
+| NVIDIA Canary-180M-Flash | 可选英文语音识别模型，CC-BY-4.0 | https://huggingface.co/nvidia/canary-180m-flash |
 | Silero VAD | 语音检测模型 | https://github.com/snakers4/silero-vad |
 | PyAV / FFmpeg | 音频解码与重采样 | https://github.com/PyAV-Org/PyAV |
 | sounddevice / PortAudio | 麦克风采集 | https://github.com/spatialaudio/python-sounddevice |
